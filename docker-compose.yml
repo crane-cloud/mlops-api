@@ -1,0 +1,48 @@
+version: "3"
+services:
+  database:
+    restart: unless-stopped
+    image: postgres:10.8-alpine
+    container_name: mlops-postgres-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: cc-monitoring
+    ports:
+      - "4220:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+  api:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mlops-api
+    environment:
+      FLASK_APP_SECRET:
+      JWT_SALT:
+      PYTHONDONTWRITEBYTECODE: 1
+      PYTHONUNBUFFERED: 1
+      FLASK_ENV: development
+      DATABASE_USER: postgres
+      DATABASE_URI: ${DATABASE_URI:-postgresql://postgres:postgres@database:5432/monitor}
+      TEST_DATABASE_URI: ${TEST_DATABASE_URI:-postgresql://postgres:postgres@database:5432/monitor_test}
+      FLASK_APP: server.py
+      PRODUCT_BASE_URL: ${PRODUCT_BASE_URL:-http://127.0.0.1:5000}
+    ports:
+      - "${FLASK_PORT:-4400}:5000"
+    develop:
+      watch:
+        - action: sync
+          path: .
+          target: /app
+    # volumes:
+    #   - .:/app
+    depends_on:
+      - database
+    links:
+      - database
+
+  
+volumes:
+  db-data:
