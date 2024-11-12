@@ -6,7 +6,7 @@ services:
     container_name: mlops-postgres-db
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_DB: cc-monitoring
+      POSTGRES_DB: postgres
     ports:
       - "4220:5432"
     volumes:
@@ -25,8 +25,8 @@ services:
       PYTHONUNBUFFERED: 1
       FLASK_ENV: development
       DATABASE_USER: postgres
-      DATABASE_URI: ${DATABASE_URI:-postgresql://postgres:postgres@database:5432/monitor}
-      TEST_DATABASE_URI: ${TEST_DATABASE_URI:-postgresql://postgres:postgres@database:5432/monitor_test}
+      DATABASE_URI: ${DATABASE_URI:-postgresql://postgres:postgres@database:5432/postgres}
+      TEST_DATABASE_URI: ${TEST_DATABASE_URI:-postgresql://postgres:postgres@database:5432/mlops_db_test}
       FLASK_APP: server.py
       PRODUCT_BASE_URL: ${PRODUCT_BASE_URL:-http://127.0.0.1:5000}
     ports:
@@ -43,6 +43,5 @@ services:
     links:
       - database
 
-  
 volumes:
   db-data:

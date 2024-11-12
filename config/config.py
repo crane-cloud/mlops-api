@@ -15,7 +15,7 @@ class Development(Base):
 
     DEBUG = True
     SQLALCHEMY_DATABASE_URI = os.getenv(
-        "DATABASE_URI", "postgresql:///cranecloud")
+        "DATABASE_URI", "postgresql:///mlops_db")
 
 
 class Testing(Base):
@@ -25,7 +25,7 @@ class Testing(Base):
     DEBUG = True
     # use a separate db
     SQLALCHEMY_DATABASE_URI = os.getenv(
-        "TEST_DATABASE_URI") or "postgresql:///cranecloud_test_db"
+        "TEST_DATABASE_URI") or "postgresql:///mlops_db_test"
 
 
 class Staging(Base):

@@ -5,11 +5,11 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify
 from flask_cors import CORS
 from flasgger import Swagger
-
 from flask_jwt_extended import JWTManager
-
+from flask_migrate import Migrate
 
 from app.routes import api
+from app.models import db
 
 
 dotenv_path = join(dirname(__file__), '.env')
@@ -31,18 +31,24 @@ def create_app(config_name):
     app.config.from_object(app_config[config_name])
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
+    # register app with the db
+    db.init_app(app)
+
     # initialize api resources
     api.init_app(app)
 
+    # initialise migrate
+    Migrate(app, db)
+
     # swagger
     app.config['SWAGGER'] = {
-        'title': 'Monitoring Cloud API',
+        'title': 'MLOps API',
         'uiversion': 3
     }
 
     Swagger(app, template_file='api_docs.yml')
 
-    jwt = JWTManager(app)
+    JWTManager(app)
 
     # handle default 404 exceptions with a custom response
 
