@@ -2,8 +2,6 @@ from functools import wraps
 from jose import jwt
 from flask import request
 from flask import current_app
-import os
-from flask_jwt_extended import verify_jwt_in_request, get_jwt
 
 
 def jwt_required(fn):
