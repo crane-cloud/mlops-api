@@ -95,8 +95,8 @@ jobs:
       - name: Helm Release
         run: |
           helm upgrade --install --create-namespace \
-          mlops-api ./helm/chart \
-          --values helm/values.micro.yaml \
+          mlops-api cranecloud/cranecloud \
+          --values helm/values.staging.yaml \
           --namespace $namespace \
           --set image.tag="${{ needs.build.outputs.tag }}" \
           --set environment.DATABASE_URI="${{ secrets.MICROSERVICE_DATABASE_URI }}" \
