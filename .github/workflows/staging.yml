@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - master
-      - deploy/staging
 
   workflow_dispatch:
 
@@ -99,7 +98,7 @@ jobs:
           --values helm/values.staging.yaml \
           --namespace $namespace \
           --set image.tag="${{ needs.build.outputs.tag }}" \
-          --set environment.DATABASE_URI="${{ secrets.MICROSERVICE_DATABASE_URI }}" \
+          --set environment.DATABASE_URI="${{ secrets.STAGING_DATABASE_URI }}" \
           --set environment.FLASK_APP_SALT="${{ secrets.STAGING_FLASK_APP_SALT }}" \
           --set environment.PRODUCT_BASE_URL="${{ secrets.STAGING_PRODUCT_BASE_URL }}" \
           --timeout=300s
