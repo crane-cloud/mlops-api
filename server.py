@@ -10,7 +10,7 @@ from flask_migrate import Migrate
 
 from app.routes import api
 from app.models import db
-
+from app.helpers.crane_app_logger import logger
 
 dotenv_path = join(dirname(__file__), '.env')
 load_dotenv(dotenv_path)
@@ -31,8 +31,13 @@ def create_app(config_name):
     app.config.from_object(app_config[config_name])
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
+    app.debug = app.config['DEBUG']
+
     # register app with the db
     db.init_app(app)
+
+    # set logging level
+    logger.setLevel(app.config['LOG_LEVEL'])
 
     # initialize api resources
     api.init_app(app)

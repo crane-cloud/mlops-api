@@ -356,7 +356,7 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
 
         new_app.url = service_url
 
-        saved = new_app.save()
+        # saved = new_app.save()
 
         # if not saved:
         # log_activity('App', status='Failed',

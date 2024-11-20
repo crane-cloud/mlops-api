@@ -22,6 +22,10 @@ paths:
             properties:
               name:
                 type: string
+              is_notebook:
+                type: boolean
+              image:
+                type: string
               project:
                 type: object
                 properties:
