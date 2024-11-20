@@ -20,21 +20,30 @@ paths:
           name: user
           schema:
             properties:
-              start:
-                type: integer
-                format: float
-              end:
-                type: integer
-                format: float
-              step:
+              name:
                 type: string
-              prometheus_url:
+              is_notebook:
+                type: boolean
+              image:
                 type: string
-              project_id:
-                type: string
-              project_name:
-                type: string
-
+              project:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  alias:
+                    type: string
+              cluster:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  host:
+                    type: string
+                  token:
+                    type: string
+                  subdomain:
+                    type: string
       responses:
         200:
           description: "App created successfully"
