@@ -72,6 +72,30 @@ paths:
         500:
           description: "Internal Server Error"
 
+  "/experiments":
+    get:
+      tags:
+        - experiments
+      produces:
+        - application/json
+      parameters:
+        - in: header
+          name: Authorization
+          required: true
+          description: "Bearer [token]"
+          type: string
+        - in: query
+          name: name
+          type: string
+          description: Name of the experiment
+      responses:
+        200:
+          description: "Experiments got successfully"
+        404:
+          description: "Experiments not found"
+        500:
+          description: "Internal Server Error"
+
   "/experiments/{experiment_id}":
     patch:
       tags:
@@ -88,6 +112,7 @@ paths:
           type: string
         - in: path
           name: experiment_id
+          required: true
           type: string
           description: Experiment id
         - in: body
@@ -96,7 +121,6 @@ paths:
             properties:
               name:
                 type: string
-              
       responses:
         200:
           description: "Experiment updated successfully"
@@ -106,6 +130,7 @@ paths:
           description: "Bad request"
         500:
           description: "Internal Server Error"
+
     get:
       tags:
         - experiments
@@ -119,6 +144,7 @@ paths:
           type: string
         - in: path
           name: experiment_id
+          required: true
           type: string
           description: Experiment id
       responses:
@@ -128,6 +154,7 @@ paths:
           description: "Experiment not found"
         500:
           description: "Internal Server Error"
+
     delete:
       tags:
         - experiments
@@ -143,6 +170,7 @@ paths:
           type: string
         - in: path
           name: experiment_id
+          required: true
           type: string
           description: Experiment id
 
@@ -155,7 +183,7 @@ paths:
           description: "Bad request"
         500:
           description: "Internal Server Error"
-  
+
   "/experiments/{experiment_id}/runs":
     get:
       tags:
@@ -172,6 +200,7 @@ paths:
           type: string
         - in: path
           name: experiment_id
+          required: true
           type: string
           description: Experiment id
         - in: query
@@ -187,7 +216,6 @@ paths:
           description: "Bad request"
         500:
           description: "Internal Server Error"
-
 
   "/run/{run_id}":
     get:
@@ -205,6 +233,7 @@ paths:
           type: string
         - in: path
           name: run_id
+          required: true
           type: string
           description: Run id
       responses:
@@ -231,8 +260,9 @@ paths:
           type: string
         - in: path
           name: run_id
+          required: true
           type: string
-          description: Run id 
+          description: "Run id"
         - in: body
           name: user
           schema:
@@ -241,7 +271,7 @@ paths:
                 type: string
               status:
                 type: string
-         
+
       responses:
         200:
           description: "Success"
@@ -250,8 +280,8 @@ paths:
         400:
           description: "Bad request"
         500:
-          description: "Internal Server Error"  
-        
+          description: "Internal Server Error"
+
     delete:
       tags:
         - runs
@@ -267,8 +297,9 @@ paths:
           type: string
         - in: path
           name: run_id
+          required: true
           type: string
-          description: Run id
+          description: "Run id"
 
       responses:
         200:

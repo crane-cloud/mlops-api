@@ -1,7 +1,6 @@
 from app.helpers.authenticate import jwt_required
 from mlflow.tracking import MlflowClient
 from flask_restful import Resource, request
-import mlflow
 from app.schemas.experiments import ExperimentsSchema
 import marshmallow
 from types import SimpleNamespace
@@ -10,7 +9,23 @@ from types import SimpleNamespace
 class ExperimentView(Resource):
     def __init__(self):
         self.client = MlflowClient("https://mlflow.renu-01.cranecloud.io")
-  
+
+    @jwt_required
+    def get(self, current_user):
+        # Retrieve all experiments
+        name = request.args.get('name', None)
+        if name:
+            experiments = self.client.search_experiments(
+                filter_string=f"name LIKE '%{name}%'")
+        else:
+            experiments = self.client.search_experiments()
+
+        return {"status": "success", "data": [{"experiment_id": exp.experiment_id, "name": exp.name} for exp in experiments]}
+
+
+class ExperimenDetailView(Resource):
+    def __init__(self):
+        self.client = MlflowClient("https://mlflow.renu-01.cranecloud.io")
 
     @jwt_required
     def get(self):
@@ -18,7 +33,7 @@ class ExperimentView(Resource):
         pass
 
     @jwt_required
-    def get(self, experiment_id):
+    def get(self, experiment_id, current_user):
         # Retrieve a single experiment by ID
 
         try:
@@ -37,19 +52,20 @@ class ExperimentView(Resource):
             return {"status": "error", "message": str(e)}, 404
 
     @jwt_required
-    def patch(self, experiment_id):
+    def patch(self, experiment_id, current_user):
         # Update experiment details
         experiments_schema = ExperimentsSchema()
         try:
             validated_data = experiments_schema.load(request.json)
         except marshmallow.exceptions.ValidationError as e:
             return dict(status="error", message=e.messages), 400
-        
+
         experiment_data = SimpleNamespace(**validated_data)
 
         try:
             if experiment_data.name:
-                self.client.rename_experiment(experiment_id, experiment_data.name)
+                self.client.rename_experiment(
+                    experiment_id, experiment_data.name)
             # if experiment_data.tags:
             #     self.client.set_experiment_tag(experiment_id, experiment_data.tags)
 
@@ -58,7 +74,7 @@ class ExperimentView(Resource):
             return {"status": "error", "message": str(e)}, 400
 
     @jwt_required
-    def delete(self, experiment_id):
+    def delete(self, experiment_id, current_user):
         # Delete an experiment
         try:
             self.client.delete_experiment(experiment_id)
@@ -72,10 +88,10 @@ class ExperimentRunsView(Resource):
         self.client = MlflowClient("https://mlflow.renu-01.cranecloud.io")
 
     @jwt_required
-    def get(self, experiment_id):
+    def get(self, experiment_id, current_user):
         # Get all runs for an experiment
         max_results = request.args.get('max_results', 100, type=int)
-    
+
         try:
             runs = self.client.search_runs(
                 experiment_ids=[experiment_id],
@@ -95,7 +111,3 @@ class ExperimentRunsView(Resource):
             }
         except Exception as e:
             return {"status": "error", "message": str(e)}, 404
-
-
-
-

@@ -1,5 +1,5 @@
 from .index import (IndexView)
 from .apps import (AppsView)
-from .experiments import (ExperimentRunsView)
-from .experiments import (ExperimentView)
+from .experiments import (
+    ExperimentRunsView, ExperimentView, ExperimenDetailView)
 from .runs import (RunView)
