@@ -53,3 +53,8 @@ typing_extensions==4.12.2
 urllib3==2.2.1
 websocket-client==1.8.0
 Werkzeug==3.0.2
+mlflow==2.18.0 
+# alembic
+# alembic==1.9.0
+# flask-migrate
+

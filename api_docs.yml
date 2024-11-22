@@ -71,3 +71,242 @@ paths:
           description: "Apps not found"
         500:
           description: "Internal Server Error"
+
+  "/experiments":
+    get:
+      tags:
+        - experiments
+      produces:
+        - application/json
+      parameters:
+        - in: header
+          name: Authorization
+          required: true
+          description: "Bearer [token]"
+          type: string
+        - in: query
+          name: name
+          type: string
+          description: Name of the experiment
+      responses:
+        200:
+          description: "Experiments got successfully"
+        404:
+          description: "Experiments not found"
+        500:
+          description: "Internal Server Error"
+
+  "/experiments/{experiment_id}":
+    patch:
+      tags:
+        - experiments
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: header
+          name: Authorization
+          required: true
+          description: "Bearer [token]"
+          type: string
+        - in: path
+          name: experiment_id
+          required: true
+          type: string
+          description: Experiment id
+        - in: body
+          name: user
+          schema:
+            properties:
+              name:
+                type: string
+      responses:
+        200:
+          description: "Experiment updated successfully"
+        404:
+          description: "Experiment not found"
+        400:
+          description: "Bad request"
+        500:
+          description: "Internal Server Error"
+
+    get:
+      tags:
+        - experiments
+      produces:
+        - application/json
+      parameters:
+        - in: header
+          name: Authorization
+          required: true
+          description: "Bearer [token]"
+          type: string
+        - in: path
+          name: experiment_id
+          required: true
+          type: string
+          description: Experiment id
+      responses:
+        200:
+          description: "Experiment fetched successfully"
+        404:
+          description: "Experiment not found"
+        500:
+          description: "Internal Server Error"
+
+    delete:
+      tags:
+        - experiments
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: header
+          name: Authorization
+          required: true
+          description: "Bearer [token]"
+          type: string
+        - in: path
+          name: experiment_id
+          required: true
+          type: string
+          description: Experiment id
+
+      responses:
+        200:
+          description: "Success"
+        404:
+          description: "Experiment not found"
+        400:
+          description: "Bad request"
+        500:
+          description: "Internal Server Error"
+
+  "/experiments/{experiment_id}/runs":
+    get:
+      tags:
+        - experiments
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: header
+          name: Authorization
+          required: true
+          description: "Bearer [token]"
+          type: string
+        - in: path
+          name: experiment_id
+          required: true
+          type: string
+          description: Experiment id
+        - in: query
+          name: max_results
+          type: integer
+          description: Number or runs
+      responses:
+        200:
+          description: "Success"
+        404:
+          description: "No runs to retrieve"
+        400:
+          description: "Bad request"
+        500:
+          description: "Internal Server Error"
+
+  "/run/{run_id}":
+    get:
+      tags:
+        - runs
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: header
+          name: Authorization
+          required: true
+          description: "Bearer [token]"
+          type: string
+        - in: path
+          name: run_id
+          required: true
+          type: string
+          description: Run id
+      responses:
+        200:
+          description: "Success"
+        404:
+          description: "Run was not found"
+        400:
+          description: "Bad request"
+        500:
+          description: "Internal Server Error"
+    patch:
+      tags:
+        - runs
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: header
+          name: Authorization
+          required: true
+          description: "Bearer [token]"
+          type: string
+        - in: path
+          name: run_id
+          required: true
+          type: string
+          description: "Run id"
+        - in: body
+          name: user
+          schema:
+            properties:
+              run_name:
+                type: string
+              status:
+                type: string
+
+      responses:
+        200:
+          description: "Success"
+        404:
+          description: "Run was not found"
+        400:
+          description: "Bad request"
+        500:
+          description: "Internal Server Error"
+
+    delete:
+      tags:
+        - runs
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: header
+          name: Authorization
+          required: true
+          description: "Bearer [token]"
+          type: string
+        - in: path
+          name: run_id
+          required: true
+          type: string
+          description: "Run id"
+
+      responses:
+        200:
+          description: "Success"
+        404:
+          description: "Run not found"
+        400:
+          description: "Bad request"
+        500:
+          description: "Internal Server Error"
