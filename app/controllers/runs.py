@@ -1,3 +1,4 @@
+from app.helpers.mlflow_service import get_run_json_object, get_mlflow_client
 from flask_restful import Resource, request
 from app.helpers.authenticate import jwt_required
 from mlflow.tracking import MlflowClient
@@ -7,33 +8,42 @@ from types import SimpleNamespace
 import marshmallow
 
 
-class RunView(Resource):
-    def __init__(self):
-        self.client = MlflowClient("https://mlflow.renu-01.cranecloud.io")
-
+class ExperimentRunsView(Resource):
     @jwt_required
-    def get(self, run_id, current_user):
-        # Get a specific run
+    def get(self, experiment_id, current_user):
+        """ Get all runs for an experiment """
+        max_results = request.args.get('max_results', 100, type=int)
+
         try:
-            run = self.client.get_run(run_id)
-            return {
-                "status": "success",
-                "data": {
-                    "run_id": run.info.run_id,
-                    "status": run.info.status,
-                    "start_time": run.info.start_time,
-                    "end_time": run.info.end_time,
-                    "metrics": run.data.metrics,
-                    "params": run.data.params,
-                    "tags": run.data.tags
-                }
-            }
+            runs = get_mlflow_client().search_runs(
+                experiment_ids=[experiment_id],
+                max_results=max_results,
+            )
         except Exception as e:
             return {"status": "error", "message": str(e)}, 404
 
+        return {"status": "success",
+                "data": [get_run_json_object(run) for run in runs]}
+
+
+class RunDetailView(Resource):
+
+    @jwt_required
+    def get(self, run_id, current_user):
+        """ Get run details """
+        try:
+            run = get_mlflow_client().get_run(run_id)
+        except Exception as e:
+            return {"status": "error", "message": str(e)}, 404
+
+        return {
+            "status": "success",
+            "data": get_run_json_object(run, full=True)
+        }
+
     @jwt_required
     def patch(self, run_id, current_user):
-        # Update run details
+        """ Update run details """
         runs_schema = RunsSchema()
         try:
             validated_data = runs_schema.load(request.json)
@@ -44,20 +54,22 @@ class RunView(Resource):
 
         try:
             if runs_data.status:
-                self.client.set_terminated(run_id, runs_data.status)
+                get_mlflow_client().set_terminated(run_id, runs_data.status)
             if runs_data.status:
-                self.client.set_tag(
+                get_mlflow_client().set_tag(
                     run_id, "mlflow.runName", runs_data.run_name)
 
-            return {"status": "success", "message": "Run updated successfully"}
         except Exception as e:
             return {"status": "error", "message": str(e)}, 400
+
+        return {"status": "success", "message": "Run updated successfully"}
 
     @jwt_required
     def delete(self, run_id, current_user):
-        # Delete a run
+        """ Delete a run """
         try:
-            self.client.delete_run(run_id)
-            return {"status": "success", "message": "Run deleted successfully"}
+            get_mlflow_client().delete_run(run_id)
         except Exception as e:
             return {"status": "error", "message": str(e)}, 400
+
+        return {"status": "success", "message": "Run deleted successfully"}
