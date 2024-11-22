@@ -35,7 +35,6 @@ class ExperimenDetailView(Resource):
     @jwt_required
     def get(self, experiment_id, current_user):
         # Retrieve a single experiment by ID
-
         try:
             experiment = self.client.get_experiment(experiment_id)
             return {
