@@ -1,31 +1,56 @@
 from app.helpers.authenticate import jwt_required
 from app.helpers.mlflow_service import get_mlflow_experiments, get_mlflow_client, get_experiment_json_object
 from flask_restful import Resource, request
-from app.schemas.experiments import ExperimentsSchema
+from app.schemas.experiments import ExperimentsSchema, UserExperimentsSchema
+from app.models.user_experiments import UserExperiments
 import marshmallow
 from types import SimpleNamespace
+import json
 
 
 class ExperimentView(Resource):
 
     @jwt_required
     def get(self, current_user):
-        """
-        Retrieve all experiments
-        """
-        mlflow_client = get_mlflow_client()
-        name = request.args.get('name', None)
+       
+        mlflow_client = get_mlflow_client()  # Initialize the MLflow client
+        app_id = request.args.get('app_id') 
+
+        if not app_id:
+            return {"status": "error", "message": "Missing 'app_id' parameter."}, 400
 
         try:
-            experiments = get_mlflow_experiments(mlflow_client, name)
+            
+            user_experiments_schema = UserExperimentsSchema(many=True)
+
+            experiments = UserExperiments.find_many_by_filters(app_id=app_id.strip())
+
+            validated_data = user_experiments_schema.dumps(experiments)
+            experiments_data_list = json.loads(validated_data)
+
+
+            if not experiments_data_list:
+                return {"status": "success", "data": []}, 200  
+
+            
+            experiment_data = []
+            for ue in experiments_data_list:
+                print(ue)
+                try:
+                    mlflow_experiment = mlflow_client.get_experiment(ue['experiment_id'])
+                    experiment_data.append(get_experiment_json_object(mlflow_experiment))
+                except Exception as e: 
+                    experiment_data.append(
+                        {"experiment_id": ue.experiment_id, "error": str(e)}
+                    )
+
+            return {"status": "success", "data": experiment_data}, 200
+
         except Exception as e:
             return {"status": "error", "message": str(e)}, 500
 
-        return {"status": "success",
-                "data": [get_experiment_json_object(exp) for exp in experiments]}
 
-
-class ExperimenDetailView(Resource):
+class ExperimentDetailView(Resource):
 
     @jwt_required
     def get(self, experiment_id, current_user):

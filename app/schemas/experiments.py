@@ -8,4 +8,10 @@ class ExperimentsSchema(Schema):
     tags = fields.Str(required=False)
 
 
+class UserExperimentsSchema(Schema):
 
+    id = fields.UUID(dump_only=True)  
+    user_id = fields.UUID() 
+    experiment_id = fields.String(required=True) 
+    app_id = fields.UUID(required=True) 
+    created_at = fields.DateTime(required=True)   
