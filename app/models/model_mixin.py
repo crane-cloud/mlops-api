@@ -1,34 +1,34 @@
 from sqlalchemy import inspect, func, column
 from sqlalchemy.exc import SQLAlchemyError
-from flask_sqlalchemy import BaseQuery
+# from flask_sqlalchemy import BaseQuery
 from ..models import db
 from sqlalchemy import or_
 import time
 from types import SimpleNamespace
 
 
-class SoftDeleteQuery(BaseQuery):
-    def __new__(cls, *args, **kwargs):
-        obj = super(SoftDeleteQuery, cls).__new__(cls)
-        with_deleted = kwargs.pop('_with_deleted', False)
-        if len(args) > 0:
-            super(SoftDeleteQuery, obj).__init__(*args, **kwargs)
-            entities = obj._entities
-            filtered_entities = [
-                entity for entity in entities if hasattr(entity, 'deleted')]
-            if not with_deleted:
-                deleted_column = getattr(
-                    obj._entities[0].mapper.class_, 'deleted')
-                return obj.filter(*filtered_entities).filter(
-                    or_(deleted_column == False, deleted_column == None))
-        return obj
+# class SoftDeleteQuery(db.Model):
+#     def __new__(cls, *args, **kwargs):
+#         obj = super(SoftDeleteQuery, cls).__new__(cls)
+#         with_deleted = kwargs.pop('_with_deleted', False)
+#         if len(args) > 0:
+#             super(SoftDeleteQuery, obj).__init__(*args, **kwargs)
+#             entities = obj._entities
+#             filtered_entities = [
+#                 entity for entity in entities if hasattr(entity, 'deleted')]
+#             if not with_deleted:
+#                 deleted_column = getattr(
+#                     obj._entities[0].mapper.class_, 'deleted')
+#                 return obj.filter(*filtered_entities).filter(
+#                     or_(deleted_column == False, deleted_column == None))
+#         return obj
 
-    def __init__(self, *args, **kwargs):
-        super(SoftDeleteQuery, self).__init__(*args, **kwargs)
+#     def __init__(self, *args, **kwargs):
+#         super(SoftDeleteQuery, self).__init__(*args, **kwargs)
 
-    def with_deleted(self):
-        return self.__class__(self._only_full_mapper_zero('get'),
-                              session=db.session(), _with_deleted=True)
+#     def with_deleted(self):
+#         return self.__class__(self._only_full_mapper_zero('get'),
+#                               session=db.session(), _with_deleted=True)
 
 
 class ModelMixin(db.Model):
@@ -176,3 +176,19 @@ class ModelMixin(db.Model):
             }
             app_info.append(item_dict)
         return app_info
+    
+    @classmethod
+    def find_many_by_filters(cls, **filters):
+        """
+        Dynamically filter records based on provided field-value pairs.
+        """
+        try:
+            query = cls.query
+
+            if filters:
+                query = query.filter_by(**filters)
+
+            return query.all()
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            raise
