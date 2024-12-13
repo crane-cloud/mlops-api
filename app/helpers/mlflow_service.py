@@ -1,6 +1,6 @@
 from mlflow.tracking import MlflowClient
 
-CLIENT_URL = "https://mlflow.renu-01.cranecloud.io"
+CLIENT_URL = "https://mlflowv2.renu-01.cranecloud.io"
 
 
 def get_mlflow_client():

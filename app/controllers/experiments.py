@@ -1,7 +1,7 @@
 from app.helpers.authenticate import jwt_required
 from app.helpers.mlflow_service import get_mlflow_experiments, get_mlflow_client, get_experiment_json_object
 from flask_restful import Resource, request
-from app.schemas.experiments import ExperimentsSchema, UserExperimentsSchema
+from app.schemas.experiments import ExperimentsSchema
 from app.models.user_experiments import UserExperiments
 import marshmallow
 from types import SimpleNamespace
@@ -14,38 +14,35 @@ class ExperimentView(Resource):
     def get(self, current_user):
        
         mlflow_client = get_mlflow_client()  # Initialize the MLflow client
-        app_id = request.args.get('app_id') 
+        app_alias = request.args.get('app_alias') 
+        user_id = request.args.get('user_id')
 
-        if not app_id:
-            return {"status": "error", "message": "Missing 'app_id' parameter."}, 400
-
+        if not user_id and not app_alias:
+            return {"error": "At least one of 'userID' or 'appAlias' must be provided"}, 400
+        
         try:
+            filter_string = ""
+            if user_id:
+                filter_string = f"tags.user_tag = '{user_id}'"
+            if app_alias:
+                if filter_string:
+                    filter_string += f" AND tags.app_tag = '{app_alias}'"
+                else:
+                    filter_string = f"tags.app_tag = '{app_alias}'"
+
+            print(filter_string)
+        
+            experiments = mlflow_client.search_experiments(filter_string=filter_string)
+
+            print(experiments)
+
+            if not experiments:
+                return { "status": "success", "message": "No experiments found for the provided criteria"}, 404
             
-            user_experiments_schema = UserExperimentsSchema(many=True)
+            response = list(map(get_experiment_json_object, experiments))
 
-            experiments = UserExperiments.find_many_by_filters(app_id=app_id.strip())
-
-            validated_data = user_experiments_schema.dumps(experiments)
-            experiments_data_list = json.loads(validated_data)
-
-
-            if not experiments_data_list:
-                return {"status": "success", "data": []}, 200  
-
-            
-            experiment_data = []
-            for ue in experiments_data_list:
-                print(ue)
-                try:
-                    mlflow_experiment = mlflow_client.get_experiment(ue['experiment_id'])
-                    experiment_data.append(get_experiment_json_object(mlflow_experiment))
-                except Exception as e: 
-                    experiment_data.append(
-                        {"experiment_id": ue.experiment_id, "error": str(e)}
-                    )
-
-            return {"status": "success", "data": experiment_data}, 200
-
+            return {"status": "success", "data": response}, 200
+        
         except Exception as e:
             return {"status": "error", "message": str(e)}, 500
 
