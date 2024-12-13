@@ -2,7 +2,6 @@ from app.helpers.authenticate import jwt_required
 from app.helpers.mlflow_service import get_mlflow_experiments, get_mlflow_client, get_experiment_json_object
 from flask_restful import Resource, request
 from app.schemas.experiments import ExperimentsSchema
-from app.models.user_experiments import UserExperiments
 import marshmallow
 from types import SimpleNamespace
 import json
