@@ -13,7 +13,7 @@ class ExperimentView(Resource):
     @jwt_required
     def get(self, current_user):
        
-        mlflow_client = get_mlflow_client()  # Initialize the MLflow client
+        mlflow_client = get_mlflow_client()  
         app_alias = request.args.get('app_alias') 
         user_id = request.args.get('user_id')
 
