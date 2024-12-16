@@ -1,24 +1,56 @@
 from app.helpers.authenticate import jwt_required
-from app.helpers.mlflow_service import get_mlflow_experiments, get_mlflow_client, get_experiment_json_object
+from app.helpers.mlflow_service import get_mlflow_experiments, get_mlflow_client, get_experiment_json_object, CLIENT_URL
 from flask_restful import Resource, request
 from app.schemas.experiments import ExperimentsSchema
 import marshmallow
 from types import SimpleNamespace
 import json
+import uuid
 
 
 class ExperimentView(Resource):
 
+    def post(self):
+        try:
+            
+            app_alias = request.args.get("app_alias")
+            user_id = request.args.get("user_id")
+
+            if not app_alias or not user_id:
+                return {"status": "failed", "error": "Both 'app_alias' and 'user_id' are required"}, 400
+            
+            experiment_name = f"experiment_{uuid.uuid4().hex[:8]}"
+
+            mlflow_client = get_mlflow_client()
+
+            # Create a new experiment
+            experiment_id = mlflow_client.create_experiment(experiment_name)
+    
+            mlflow_client.set_experiment_tag(
+                experiment_id, "app_tag", app_alias)
+            mlflow_client.set_experiment_tag(
+                experiment_id, "user_tag", user_id)
+            
+            return {
+                "message": "MLflow setup complete",
+                "tracking_uri": CLIENT_URL,
+                "experiment_id": experiment_id,
+                "experiment_name": experiment_name
+            }, 200
+
+        except Exception as e:
+            return {"error": str(e)}, 500
+
     @jwt_required
     def get(self, current_user):
-       
-        mlflow_client = get_mlflow_client()  
-        app_alias = request.args.get('app_alias') 
+
+        mlflow_client = get_mlflow_client()
+        app_alias = request.args.get('app_alias')
         user_id = request.args.get('user_id')
 
         if not user_id and not app_alias:
             return {"error": "At least one of 'userID' or 'appAlias' must be provided"}, 400
-        
+
         try:
             filter_string = ""
             if user_id:
@@ -30,18 +62,19 @@ class ExperimentView(Resource):
                     filter_string = f"tags.app_tag = '{app_alias}'"
 
             print(filter_string)
-        
-            experiments = mlflow_client.search_experiments(filter_string=filter_string)
+
+            experiments = mlflow_client.search_experiments(
+                filter_string=filter_string)
 
             print(experiments)
 
             if not experiments:
-                return { "status": "success", "message": "No experiments found for the provided criteria"}, 404
-            
+                return {"status": "success", "message": "No experiments found for the provided criteria"}, 404
+
             response = list(map(get_experiment_json_object, experiments))
 
             return {"status": "success", "data": response}, 200
-        
+
         except Exception as e:
             return {"status": "error", "message": str(e)}, 500
 
@@ -53,6 +86,7 @@ class ExperimentDetailView(Resource):
         """ Retrieve a single experiment by ID """
         try:
             experiment = get_mlflow_client().get_experiment(experiment_id)
+            print(experiment)
         except Exception as e:
             return {"status": "error", "message": str(e)}, 404
 
