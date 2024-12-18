@@ -85,9 +85,13 @@ paths:
           description: "Bearer [token]"
           type: string
         - in: query
-          name: name
+          name: user_id
           type: string
-          description: Name of the experiment
+          description: User id
+        - in: query
+          name: app_alias
+          type: string
+          description: app alias
       responses:
         200:
           description: "Experiments got successfully"
