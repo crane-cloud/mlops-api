@@ -1,7 +1,8 @@
 from mlflow.tracking import MlflowClient
-from config.config import config
+from flask import current_app
 
-CLIENT_URL = config.MLFLOW_TRACKING_URI
+
+CLIENT_URL = MlflowClient(current_app.config['MLFLOW_TRACKING_URI'])
 
 
 def get_mlflow_client():
