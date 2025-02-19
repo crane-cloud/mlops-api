@@ -1,6 +1,7 @@
 from app.helpers.authenticate import jwt_required
-from app.helpers.mlflow_service import get_mlflow_experiments, get_mlflow_client, get_experiment_json_object, CLIENT_URL
+from app.helpers.mlflow_service import get_mlflow_experiments, get_mlflow_client, get_experiment_json_object
 from flask_restful import Resource, request
+from flask import current_app
 from app.schemas.experiments import ExperimentsSchema
 import marshmallow
 from types import SimpleNamespace
@@ -12,28 +13,28 @@ class ExperimentView(Resource):
 
     def post(self):
         try:
-            
+
             app_alias = request.args.get("app_alias")
             user_id = request.args.get("user_id")
 
             if not app_alias or not user_id:
                 return {"status": "failed", "error": "Both 'app_alias' and 'user_id' are required"}, 400
-            
+
             experiment_name = f"experiment_{uuid.uuid4().hex[:8]}"
 
-            mlflow_client = get_mlflow_client()
+            mlflow_client = get_mlflow_client(current_app)
 
             # Create a new experiment
             experiment_id = mlflow_client.create_experiment(experiment_name)
-    
+
             mlflow_client.set_experiment_tag(
                 experiment_id, "app_tag", app_alias)
             mlflow_client.set_experiment_tag(
                 experiment_id, "user_tag", user_id)
-            
+
             return {
                 "message": "MLflow setup complete",
-                "tracking_uri": CLIENT_URL,
+                "tracking_uri": current_app.config['MLFLOW_TRACKING_URI'],
                 "experiment_id": experiment_id,
                 "experiment_name": experiment_name
             }, 200
@@ -44,7 +45,7 @@ class ExperimentView(Resource):
     @jwt_required
     def get(self, current_user):
 
-        mlflow_client = get_mlflow_client()
+        mlflow_client = get_mlflow_client(current_app)
         app_alias = request.args.get('app_alias')
         user_id = request.args.get('user_id')
 
@@ -85,7 +86,8 @@ class ExperimentDetailView(Resource):
     def get(self, experiment_id, current_user):
         """ Retrieve a single experiment by ID """
         try:
-            experiment = get_mlflow_client().get_experiment(experiment_id)
+            experiment = get_mlflow_client(
+                current_app).get_experiment(experiment_id)
             print(experiment)
         except Exception as e:
             return {"status": "error", "message": str(e)}, 404
@@ -106,7 +108,7 @@ class ExperimentDetailView(Resource):
 
         try:
             if experiment_data.name:
-                get_mlflow_client().rename_experiment(
+                get_mlflow_client(current_app).rename_experiment(
                     experiment_id, experiment_data.name)
         except Exception as e:
             return {"status": "error", "message": str(e)}, 400
@@ -117,7 +119,7 @@ class ExperimentDetailView(Resource):
     def delete(self, experiment_id, current_user):
         """ Delete an experiment """
         try:
-            get_mlflow_client().delete_experiment(experiment_id)
+            get_mlflow_client(current_app).delete_experiment(experiment_id)
         except Exception as e:
             return {"status": "error", "message": str(e)}, 400
 

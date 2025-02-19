@@ -1,11 +1,10 @@
 from app.helpers.mlflow_service import get_run_json_object, get_mlflow_client
 from flask_restful import Resource, request
 from app.helpers.authenticate import jwt_required
-from mlflow.tracking import MlflowClient
-import mlflow
 from app.schemas.runs import RunsSchema
 from types import SimpleNamespace
 import marshmallow
+from flask import current_app
 
 
 class ExperimentRunsView(Resource):
@@ -15,7 +14,7 @@ class ExperimentRunsView(Resource):
         max_results = request.args.get('max_results', 100, type=int)
 
         try:
-            runs = get_mlflow_client().search_runs(
+            runs = get_mlflow_client(current_app).search_runs(
                 experiment_ids=[experiment_id],
                 max_results=max_results,
             )
@@ -32,7 +31,7 @@ class RunDetailView(Resource):
     def get(self, run_id, current_user):
         """ Get run details """
         try:
-            run = get_mlflow_client().get_run(run_id)
+            run = get_mlflow_client(current_app).get_run(run_id)
         except Exception as e:
             return {"status": "error", "message": str(e)}, 404
 
@@ -54,9 +53,10 @@ class RunDetailView(Resource):
 
         try:
             if runs_data.status:
-                get_mlflow_client().set_terminated(run_id, runs_data.status)
+                get_mlflow_client(current_app).set_terminated(
+                    run_id, runs_data.status)
             if runs_data.status:
-                get_mlflow_client().set_tag(
+                get_mlflow_client(current_app).set_tag(
                     run_id, "mlflow.runName", runs_data.run_name)
 
         except Exception as e:
@@ -68,7 +68,7 @@ class RunDetailView(Resource):
     def delete(self, run_id, current_user):
         """ Delete a run """
         try:
-            get_mlflow_client().delete_run(run_id)
+            get_mlflow_client(current_app).delete_run(run_id)
         except Exception as e:
             return {"status": "error", "message": str(e)}, 400
 

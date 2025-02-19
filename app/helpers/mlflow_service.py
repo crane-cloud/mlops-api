@@ -1,11 +1,8 @@
 from mlflow.tracking import MlflowClient
-from config.config import config
-
-CLIENT_URL = config.MLFLOW_TRACKING_URI
 
 
-def get_mlflow_client():
-    return MlflowClient(CLIENT_URL)
+def get_mlflow_client(current_app):
+    return MlflowClient(current_app.config['MLFLOW_TRACKING_URI'])
 
 
 def get_mlflow_experiments(client, name=None):
