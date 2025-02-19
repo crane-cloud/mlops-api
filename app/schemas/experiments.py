@@ -7,5 +7,3 @@ class ExperimentsSchema(Schema):
     name = fields.Str(required=False)
     tags = fields.Str(required=False)
 
-
-

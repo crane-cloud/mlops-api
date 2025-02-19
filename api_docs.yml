@@ -73,6 +73,29 @@ paths:
           description: "Internal Server Error"
 
   "/experiments":
+    post:
+      tags:
+        - experiments
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: query
+          name: user_id
+          type: string
+          description: User id
+        - in: query
+          name: app_alias
+          type: string
+          description: app alias
+      responses:
+        200:
+          description: "App created successfully"
+        400:
+          description: "Bad request"
+        500:
+          description: "Internal Server Error"
     get:
       tags:
         - experiments
@@ -85,9 +108,13 @@ paths:
           description: "Bearer [token]"
           type: string
         - in: query
-          name: name
+          name: user_id
           type: string
-          description: Name of the experiment
+          description: User id
+        - in: query
+          name: app_alias
+          type: string
+          description: app alias
       responses:
         200:
           description: "Experiments got successfully"
