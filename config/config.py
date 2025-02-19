@@ -18,6 +18,7 @@ class Base:
     SYSTEM_DOCKER_EMAIL = os.getenv("SYSTEM_DOCKER_EMAIL")
     SYSTEM_DOCKER_PASSWORD = os.getenv("SYSTEM_DOCKER_PASSWORD")
     SYSTEM_DOCKER_SERVER = os.getenv("SYSTEM_DOCKER_SERVER", 'docker.io')
+    MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI")
 
 
 class Development(Base):

@@ -1,6 +1,7 @@
 from mlflow.tracking import MlflowClient
+from config.config import config
 
-CLIENT_URL = "https://mlflowv2.renu-01.cranecloud.io"
+CLIENT_URL = config.MLFLOW_TRACKING_URI
 
 
 def get_mlflow_client():

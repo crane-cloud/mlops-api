@@ -30,6 +30,7 @@ environment:
   FLASK_ENV: staging
   FLASK_APP_SALT: ${{ FLASK_APP_SALT }}
   PRODUCT_BASE_URL: ${{PRODUCT_BASE_URL}}
+  MLFLOW_TRACKING_URI: ${{MLFLOW_TRACKING_URI}}
 
 celery:
   create: false
