@@ -3,3 +3,4 @@ from .apps import (AppsView)
 from .experiments import (
     ExperimentView, ExperimentDetailView)
 from .runs import (RunDetailView, ExperimentRunsView)
+from .artifacts import (ArtifactsView,ArtifactDownloadView)

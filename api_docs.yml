@@ -337,3 +337,76 @@ paths:
           description: "Bad request"
         500:
           description: "Internal Server Error"
+
+  "/artifacts/{experiment_id}":
+    get:
+      tags:
+        - artifacts
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: header
+          name: Authorization
+          required: true
+          description: "Bearer [token]"
+          type: string
+        - in: path
+          name: experiment_id
+          required: true
+          type: string
+          description: Experiment id
+      responses:
+        200:
+          description: "Success"
+        404:
+          description: "Experiment was not found"
+        400:
+          description: "Bad request"
+        500:
+          description: "Internal Server Error"
+
+  "/artifacts/{experiment_id}/download/{run_id}/{artifact_path}":
+    get:
+      tags:
+        - artifacts
+      consumes:
+        - application/json
+      produces:
+        - application/octet-stream
+      parameters:
+        - in: header
+          name: Authorization
+          required: true
+          description: "Bearer [token]"
+          type: string
+        - in: path
+          name: experiment_id
+          required: true
+          type: string
+          description: Experiment id
+        - in: path
+          name: run_id
+          required: true
+          type: string
+          description: Run id
+        - in: path
+          name: artifact_path
+          required: true
+          type: string
+          description: Path to the artifact
+      responses:
+        200:
+          description: "File download successful"
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        404:
+          description: "Artifact not found"
+        400:
+          description: "Bad request"
+        500:
+          description: "Internal Server Error"
