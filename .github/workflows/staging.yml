@@ -115,6 +115,7 @@ jobs:
           --set environment.DATABASE_URI="${{ secrets.STAGING_DATABASE_URI }}" \
           --set environment.FLASK_APP_SALT="${{ secrets.STAGING_FLASK_APP_SALT }}" \
           --set environment.PRODUCT_BASE_URL="${{ secrets.STAGING_PRODUCT_BASE_URL }}" \
+          --set environment.MLFLOW_TRACKING_URI="${{ secrets.STAGING_MLFLOW_TRACKING_URI }}" \
           --timeout=300s
 
       - name: Monitor Rollout
