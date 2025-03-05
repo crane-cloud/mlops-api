@@ -17,6 +17,10 @@ class AppsView(Resource):
             validated_data = app_schema.load(request.json)
         except marshmallow.exceptions.ValidationError as e:
             return dict(status="error", message=e.messages), 400
+        if validated_data.get('is_modal') and not validated_data.get('model_image_uri'):
+            return dict(status="error", message="Missing data for required field, model_image_uri"), 400
+        if validated_data.get('is_modal') and not validated_data.get('model_server'):
+            return dict(status="error", message="Missing data for required field, model_server"), 400
 
         namepaced_data = SimpleNamespace(**validated_data)
         namepaced_data.cluster = SimpleNamespace(**namepaced_data.cluster)
@@ -27,7 +31,7 @@ class AppsView(Resource):
             kube_host=namepaced_data.cluster.host,
             kube_token=namepaced_data.cluster.token
         )
-        # return True
+
         new_app = deploy_user_app(kube_client=kube_client, project=namepaced_data.project,
                                   cluster=namepaced_data.cluster, app_data=validated_data)
         if type(new_app) == SimpleNamespace and hasattr(new_app, 'status_code'):

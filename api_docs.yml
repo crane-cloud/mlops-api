@@ -24,8 +24,18 @@ paths:
                 type: string
               is_notebook:
                 type: boolean
+              is_modal:
+                type: boolean
               image:
                 type: string
+              model_image_uri:
+                type: string
+              api_type:
+                type: string
+                enum: [REST, GRPC]
+              model_type:
+                type: string
+                enum: [sklearn, tensorflow, pytorch, xgboost, custom]
               project:
                 type: object
                 properties:
