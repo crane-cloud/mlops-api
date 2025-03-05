@@ -30,6 +30,7 @@ def create_kube_clients(kube_host, kube_token):
     batchv1_api = client.BatchV1Api(client.ApiClient(config))
     storageV1Api = client.StorageV1Api(client.ApiClient(config))
     networking_api = client.NetworkingV1Api(client.ApiClient(config))
+    custom_api = client.CustomObjectsApi(client.ApiClient(config))
 
     # return kube, extension_api, appsv1_api, api_client, batchv1_api, storageV1Api
     return SimpleNamespace(
@@ -39,7 +40,8 @@ def create_kube_clients(kube_host, kube_token):
         appsv1_api=appsv1_api,
         api_client=api_client,
         batchv1_api=batchv1_api,
-        storageV1Api=storageV1Api
+        storageV1Api=storageV1Api,
+        custom_api=custom_api
     )
 
 
@@ -54,25 +56,39 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
         'image_pull_secret': False,
         'app_deployment': False,
         'app_service': False,
-        'ingress_entry': False
+        'ingress_entry': False,
+        'seldon_deployment': False
     }
 
     is_notebook = app_data.get('is_notebook', False)
+    is_modal = app_data.get('is_modal', False)
     app_name = app_data.get('name', None)
-    if is_notebook:
+    if is_notebook or is_modal:
         if not app_name:
             return SimpleNamespace(
                 message='Missing data for required field, name',
                 status_code=400
             )
-        notebook_data = {
-            'image': 'cranecloud/jupyter-notebook:latest',
-            'port': 8888,
-            'is_ai': True,
-            'is_notebook': True,
-            'name': app_name
-        }
-        app_data.update(notebook_data)
+        if is_notebook:
+            notebook_data = {
+                'image': 'cranecloud/jupyter-notebook:latest',
+                'port': 8888,
+                'is_ai': True,
+                'is_notebook': True,
+                'name': app_name
+            }
+            app_data.update(notebook_data)
+        if is_modal:
+            modal_data = {
+                'model_image_uri': app_data.get('model_image_uri'),
+                'port': 8000,
+                'is_ai': True,
+                'is_modal': True,
+                'api_type': app_data.get('api_type', 'REST'),
+                'model_server': app_data.get('model_server', 'MLFLOW_SERVER'),
+                'name': app_name
+            }
+            app_data.update(modal_data)
 
     # check images existence
     app_image = app_data.get('image', None)
@@ -131,7 +147,7 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
                 port=app_port,
                 command=command_string,
                 replicas=replicas,
-                private_image=private_repo
+                private_image=private_repo,
             )
 
         if private_repo:
@@ -170,14 +186,18 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
             # update registry
             resource_registry['image_pull_secret'] = True
 
-         # create deployment
+        # create deployment
         dep_name = f'{app_alias}-deployment'
 
         mount_path = '/data'
 
         # create app deployment's pvc meta and spec
         is_ai = app_data.get('is_ai', False)
-        if is_ai:
+        new_volume_mount = None
+        new_volumes = None
+        service_port = current_app.config['KUBE_SERVICE_PORT']
+
+        if is_ai and is_notebook:
             pvc_name = f'{app_alias}-pvc'
             new_app.is_ai = True
             if is_notebook:
@@ -185,6 +205,9 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
                 new_app.is_notebook = True
             volumes, volume_mount = create_pvc(
                 kube_client, pvc_name, namespace, mount_path=mount_path)
+            new_volume_mount = volume_mount
+            new_volumes = volumes
+            resource_registry['pvc'] = True
 
         # EnvVar
         env = []
@@ -201,7 +224,7 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
             ports=[client.V1ContainerPort(container_port=app_port)],
             env=env,
             command=command,
-            volume_mounts=[volume_mount] if is_ai else None
+            volume_mounts=[new_volume_mount] if is_ai and is_notebook else None
         )
 
         # spec
@@ -212,7 +235,7 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
             spec=client.V1PodSpec(
                 containers=[container],
                 image_pull_secrets=[image_pull_secret],
-                volumes=volumes if is_ai else None
+                volumes=new_volumes if is_ai and is_notebook else None
             )
         )
 
@@ -231,51 +254,72 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
             spec=spec
         )
 
-        # create deployment in  cluster
-
-        kube_client.appsv1_api.create_namespaced_deployment(
-            body=deployment,
-            namespace=namespace,
-            _preload_content=False
-        )
-
-        # update registry
-        resource_registry['app_deployment'] = True
-
         # create service in the cluster
         service_name = f'{app_alias}-service'
+        if is_modal:
+            # Create Seldon Deployment
+            seldon_deployment = create_seldon_deployment(
+                kube_client=kube_client,
+                app_alias=app_alias,
+                namespace=namespace,
+                model_image_uri=app_data['model_image_uri'],
+                replicas=replicas,
+                api_type=app_data['api_type'],
+                model_server=app_data['model_server']
+            )
+            if isinstance(seldon_deployment, SimpleNamespace) and hasattr(seldon_deployment, 'status_code'):
+                return seldon_deployment
+            service_name = f'{app_alias}-{seldon_deployment.service_append}'
+            service_port = app_port if app_port else seldon_deployment.port
+            new_app.port = service_port
+            new_app.is_ai = True
+            new_app.is_modal = True
+            new_app.model_image_uri = app_data['model_image_uri']
+            new_app.model_server = app_data['model_server']
+            new_app.api_type = app_data['api_type']
+            resource_registry['seldon_deployment'] = True
+        else:
+            # create deployment in  cluster
+            kube_client.appsv1_api.create_namespaced_deployment(
+                body=deployment,
+                namespace=namespace,
+                _preload_content=False
+            )
 
-        service_meta = client.V1ObjectMeta(
-            name=service_name,
-            labels={'app': app_alias}
-        )
+            # update registry
+            resource_registry['app_deployment'] = True
 
-        service_spec = client.V1ServiceSpec(
-            type='ClusterIP',
-            ports=[client.V1ServicePort(
-                port=int(current_app.config['KUBE_SERVICE_PORT']), target_port=app_port)],
-            selector={'app': app_alias}
-        )
+            service_meta = client.V1ObjectMeta(
+                name=service_name,
+                labels={'app': app_alias}
+            )
 
-        service = client.V1Service(
-            metadata=service_meta,
-            spec=service_spec)
+            service_spec = client.V1ServiceSpec(
+                type='ClusterIP',
+                ports=[client.V1ServicePort(
+                    port=int(service_port), target_port=app_port)],
+                selector={'app': app_alias}
+            )
 
-        try:
-            # Check if service exists in the cluster
-            kube_client.kube.read_namespaced_service(
-                service_name, project.alias)
-            # Delete service
-            kube_client.kube.delete_namespaced_service(
-                service_name, project.alias)
-        except:
-            pass
+            service = client.V1Service(
+                metadata=service_meta,
+                spec=service_spec)
 
-        kube_client.kube.create_namespaced_service(
-            namespace=namespace,
-            body=service,
-            _preload_content=False
-        )
+            try:
+                # Check if service exists in the cluster
+                kube_client.kube.read_namespaced_service(
+                    service_name, project.alias)
+                # Delete service
+                kube_client.kube.delete_namespaced_service(
+                    service_name, project.alias)
+            except:
+                pass
+
+            kube_client.kube.create_namespaced_service(
+                namespace=namespace,
+                body=service,
+                _preload_content=False
+            )
 
         # update resource registry
         resource_registry['app_service'] = True
@@ -293,7 +337,7 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
             service=client.V1IngressServiceBackend(
                 name=service_name,
                 port=client.V1ServiceBackendPort(
-                    number=current_app.config['KUBE_SERVICE_PORT']
+                    number=service_port
                 )
             )
         )
@@ -356,25 +400,6 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
 
         new_app.url = service_url
 
-        # saved = new_app.save()
-
-        # if not saved:
-        # log_activity('App', status='Failed',
-        #              operation='Create',
-        #              description='Internal Server Error',
-        #              a_project=project,
-        #              a_cluster_id=project.cluster_id)
-        # return SimpleNamespace(
-        #     message='Internal Server Error',
-        #     status_code=500
-        # )
-
-        # log_activity('App', status='Success',
-        #              operation='Create',
-        #              description='Created app Successfully',
-        #              a_project=project,
-        #              a_cluster_id=project.cluster_id,
-        #              a_app=new_app)
         return new_app
 
     except client.rest.ApiException as e:
@@ -587,3 +612,51 @@ def delete_cluster_app(kube_client, namespace, app):
 def check_kube_error_code(error):
     # prevent a 401 from being sent to the frontend
     return 511 if error == 401 else error
+
+
+def create_seldon_deployment(kube_client, app_alias, namespace, model_image_uri, replicas, api_type, model_server):
+    service_append = "default"
+    port = 8000
+    sdep_body = {
+        "apiVersion": "machinelearning.seldon.io/v1",
+        "kind": "SeldonDeployment",
+        "metadata": {
+            "name": f"{app_alias}",
+            "namespace": namespace
+        },
+        "spec": {
+            "name": app_alias,
+            "predictors": [{
+                "name": service_append,
+                "replicas": replicas,
+                "graph": {
+                    "name": "classifier",
+                    "implementation": model_server,
+                    "modelUri": model_image_uri,
+                    "type": "MODEL",
+                    "endpoint": {
+                        "type": api_type
+                    }
+                }
+            }]
+        }
+    }
+
+    try:
+        kube_client.custom_api.create_namespaced_custom_object(
+            group="machinelearning.seldon.io",
+            version="v1",
+            namespace=namespace,
+            plural="seldondeployments",
+            body=sdep_body
+        )
+        return SimpleNamespace(
+            service_append=service_append,
+            port=port
+        )
+    except client.rest.ApiException as e:
+        logger.exception('Seldon Deployment creation failed')
+        return SimpleNamespace(
+            message=json.loads(e.body),
+            status_code=500
+        )

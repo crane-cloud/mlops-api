@@ -51,4 +51,12 @@ def resource_clean_up(registry, app_alias, namespace, kube_client):
         except Exception:
             pass
 
-    # To do: Add clean up for ingress_entry
+    if 'pvc' in resources:
+        # delete pvc
+        pvc_name = f'{app_alias}-pvc'
+        try:
+            kube_client.kube.delete_namespaced_persistent_volume_claim(
+                pvc_name, namespace
+            )
+        except Exception:
+            pass
