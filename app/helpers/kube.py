@@ -147,7 +147,7 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
                 port=app_port,
                 command=command_string,
                 replicas=replicas,
-                private_image=private_repo
+                private_image=private_repo,
             )
 
         if private_repo:
@@ -271,6 +271,12 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
                 return seldon_deployment
             service_name = f'{app_alias}-{seldon_deployment.service_append}'
             service_port = app_port if app_port else seldon_deployment.port
+            new_app.port = service_port
+            new_app.is_ai = True
+            new_app.is_modal = True
+            new_app.model_image_uri = app_data['model_image_uri']
+            new_app.model_server = app_data['model_server']
+            new_app.api_type = app_data['api_type']
             resource_registry['seldon_deployment'] = True
         else:
             # create deployment in  cluster
