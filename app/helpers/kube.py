@@ -64,9 +64,9 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
     is_notebook = app_data.get('is_notebook', False)
     is_modal = app_data.get('is_modal', False)
     app_name = app_data.get('name', None)
-    is_mlflow = app_data.get('is_mlflow', False)
+    model_server = app_data.get('model_server', 'MLFLOW_SERVER')
 
-    if is_notebook or is_modal or is_mlflow:
+    if is_notebook or is_modal:
         if not app_name:
             return SimpleNamespace(
                 message='Missing data for required field, name',
@@ -92,17 +92,6 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
                 'name': app_name
             }
             app_data.update(modal_data)
-        if is_mlflow:
-            mlflow_data = {
-                'mlflow_artifact_uri': app_data.get('mlflow_artifact_uri', None),
-                'port': 8000,
-                'is_ai': True,
-                'is_modal': True,
-                'api_type': app_data.get('api_type', 'REST'),
-                'model_server': app_data.get('model_server', 'MLFLOW_SERVER'),
-                'name': app_name
-            }
-            app_data.update(mlflow_data)
         
 
     # check images existence
@@ -271,7 +260,7 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
 
         # create service in the cluster
         service_name = f'{app_alias}-service'
-        if is_modal and not is_mlflow:
+        if is_modal and not model_server == 'MLFLOW_SERVER':
             # Create Seldon Deployment
             seldon_deployment = create_seldon_deployment(
                 kube_client=kube_client,
@@ -294,13 +283,13 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
             new_app.api_type = app_data['api_type']
 
             resource_registry['seldon_deployment'] = True
-        elif is_modal and is_mlflow:
+        elif is_modal and model_server == 'MLFLOW_SERVER':
             # Create MLflow Seldon Deployment
             seldon_deployment = create_seldon_deployment_mlflow(
                 kube_client=kube_client,
                 app_alias=app_alias,
                 namespace=namespace,
-                model_uri=app_data['mlflow_artifact_uri'],
+                model_uri=app_data['model_image_uri'],
                 replicas=replicas
             )
             if isinstance(seldon_deployment, SimpleNamespace) and hasattr(seldon_deployment, 'status_code'):
@@ -310,7 +299,7 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
             new_app.port = service_port
             new_app.is_ai = True
             new_app.is_modal = True
-            new_app.model_image_uri = app_data['mlflow_artifact_uri']
+            new_app.model_image_uri = app_data['model_image_uri']
             new_app.model_server = app_data['model_server']
             new_app.api_type = app_data['api_type']
             resource_registry['seldon_deployment'] = True

@@ -43,5 +43,3 @@ class AppDeploySchema(Schema):
             "CUSTOM_INFERENCE_SERVER"
         ]
     ))
-    is_mlflow = fields.Bool(required=False)
-    mlflow_artifact_uri = fields.Str(required=False)

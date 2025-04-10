@@ -30,10 +30,6 @@ paths:
                 type: string
               model_image_uri:
                 type: string
-              mlflow_artifact_uri:
-                type: boolean
-              is_mlflow:
-                type: boolean
               api_type:
                 type: string
                 enum: [REST, GRPC]
