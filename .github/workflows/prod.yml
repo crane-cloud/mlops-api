@@ -1,5 +1,5 @@
 ---
-name: Staging Deployment
+name: Production Deployment
 
 on:
   release:
