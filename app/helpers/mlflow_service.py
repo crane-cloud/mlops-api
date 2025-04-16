@@ -1,4 +1,5 @@
 from mlflow.tracking import MlflowClient
+from mlflow.exceptions import MlflowException
 import json
 
 
@@ -56,3 +57,39 @@ def get_run_json_object(run, full=False):
     }
 
     return safe_serialize(run_info)
+
+
+
+
+def validate_mlflow_artifact(mlflow_artifact_uri):
+   
+    try:
+        client = MlflowClient()
+
+        # Validate the artifact URI format
+        if not mlflow_artifact_uri.startswith("runs:/"):
+            return {"status": "error", "message": "Invalid MLflow artifact URI format."}, 400
+
+        # Extract run ID and artifact path
+        try:
+            run_id, artifact_path = mlflow_artifact_uri.replace("runs:/", "", 1).split("/", 1)
+        except ValueError:
+            return {"status": "error", "message": "Malformed MLflow artifact URI."}, 400
+
+        # Validate run existence
+        try:
+            client.get_run(run_id)
+        except MlflowException:
+            return {"status": "error", "message": f"Run ID '{run_id}' does not exist."}, 404
+
+        # Validate artifact existence
+        artifacts = client.list_artifacts(run_id)
+        if not any(artifact.path == artifact_path for artifact in artifacts):
+            return {"status": "error", "message": f"Artifact '{artifact_path}' does not exist in run '{run_id}'."}, 404
+
+        return mlflow_artifact_uri
+
+    except MlflowException as e:
+        return {"status": "error", "message": f"MLflow error: {str(e)}"}, 500
+    except Exception as e:
+        return {"status": "error", "message": f"Unexpected error: {str(e)}"}, 500

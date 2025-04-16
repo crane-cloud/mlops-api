@@ -6,6 +6,7 @@ import base64
 import json
 from app.helpers.clean_up import resource_clean_up
 from app.helpers.crane_app_logger import logger
+from flask import current_app
 
 
 def get_app_subdomain(alias, domain):
@@ -63,6 +64,8 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
     is_notebook = app_data.get('is_notebook', False)
     is_modal = app_data.get('is_modal', False)
     app_name = app_data.get('name', None)
+    model_server = app_data.get('model_server', 'MLFLOW_SERVER')
+
     if is_notebook or is_modal:
         if not app_name:
             return SimpleNamespace(
@@ -89,6 +92,7 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
                 'name': app_name
             }
             app_data.update(modal_data)
+        
 
     # check images existence
     app_image = app_data.get('image', None)
@@ -256,7 +260,7 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
 
         # create service in the cluster
         service_name = f'{app_alias}-service'
-        if is_modal:
+        if is_modal and not model_server == 'MLFLOW_SERVER':
             # Create Seldon Deployment
             seldon_deployment = create_seldon_deployment(
                 kube_client=kube_client,
@@ -277,7 +281,29 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
             new_app.model_image_uri = app_data['model_image_uri']
             new_app.model_server = app_data['model_server']
             new_app.api_type = app_data['api_type']
+
             resource_registry['seldon_deployment'] = True
+        elif is_modal and model_server == 'MLFLOW_SERVER':
+            # Create MLflow Seldon Deployment
+            seldon_deployment = create_seldon_deployment_mlflow(
+                kube_client=kube_client,
+                app_alias=app_alias,
+                namespace=namespace,
+                model_uri=app_data['model_image_uri'],
+                replicas=replicas
+            )
+            if isinstance(seldon_deployment, SimpleNamespace) and hasattr(seldon_deployment, 'status_code'):
+                return seldon_deployment
+            service_name = f'{app_alias}-{seldon_deployment.service_append}'
+            service_port = app_port if app_port else seldon_deployment.port
+            new_app.port = service_port
+            new_app.is_ai = True
+            new_app.is_modal = True
+            new_app.model_image_uri = app_data['model_image_uri']
+            new_app.model_server = app_data['model_server']
+            new_app.api_type = app_data['api_type']
+            resource_registry['seldon_deployment'] = True
+
         else:
             # create deployment in  cluster
             kube_client.appsv1_api.create_namespaced_deployment(
@@ -656,6 +682,117 @@ def create_seldon_deployment(kube_client, app_alias, namespace, model_image_uri,
         )
     except client.rest.ApiException as e:
         logger.exception('Seldon Deployment creation failed')
+        return SimpleNamespace(
+            message=json.loads(e.body),
+            status_code=500
+        )
+
+
+def create_seldon_deployment_mlflow(kube_client, app_alias, namespace, model_uri, replicas=1):
+    service_append = "default"
+    port = 8000
+
+    sdep_body = {
+        "apiVersion": "machinelearning.seldon.io/v1",
+        "kind": "SeldonDeployment",
+        "metadata": {
+            "name": f"{app_alias}",
+            "namespace": namespace
+        },
+        "spec": {
+            "name": app_alias,
+            "predictors": [{
+                "name": service_append,
+                "replicas": replicas,
+                "graph": {
+                    "name": "classifier",
+                    "implementation": "MLFLOW_SERVER",
+                    "modelUri": "file:///mnt/model",  # Matches the initContainer's extraction path
+                    "children": []
+                },
+                "componentSpecs": [{
+                    "spec": {
+                        "initContainers": [{
+                            "name": "classifier-model-initializer",
+                            "image": "khalifan1126/cc-mlflow-storage-initialiser:amdp",  # Custom storage initializer image
+                            "imagePullPolicy": "IfNotPresent",
+                            "env": [
+                                {
+                                    "name": "MODEL_URI",
+                                    "value": model_uri  
+                                },
+                                {
+                                    "name": "MLFLOW_TRACKING_URI",
+                                    "value": current_app.config['MLFLOW_TRACKING_URI'] 
+                                }
+                            ],
+                            "terminationMessagePath": "/dev/termination-log",
+                            "terminationMessagePolicy": "File",
+                            "volumeMounts": [
+                                {
+                                    "mountPath": "/mnt/model",
+                                    "name": "classifier-provision-location"
+                                }
+                            ]
+                        }],
+                        "containers": [{
+                            "name": "classifier",
+                            "imagePullPolicy": "IfNotPresent",
+                            "volumeMounts": [
+                                {
+                                    "mountPath": "/mnt/model",
+                                    "name": "classifier-provision-location"
+                                }
+                            ],
+                            "livenessProbe": {
+                                "initialDelaySeconds": 80,
+                                "failureThreshold": 200,
+                                "periodSeconds": 5,
+                                "successThreshold": 1,
+                                "httpGet": {
+                                    "path": "/health/ping",
+                                    "port": "http",
+                                    "scheme": "HTTP"
+                                }
+                            },
+                            "readinessProbe": {
+                                "initialDelaySeconds": 80,
+                                "failureThreshold": 200,
+                                "periodSeconds": 5,
+                                "successThreshold": 1,
+                                "httpGet": {
+                                    "path": "/health/ping",
+                                    "port": "http",
+                                    "scheme": "HTTP"
+                                }
+                            }
+                        }],
+                        "volumes": [
+                            {
+                                "name": "classifier-provision-location",
+                                "emptyDir": {}
+                            }
+                        ]
+                    }
+                }]
+            }]
+        }
+    }
+
+    try:
+        kube_client.custom_api.create_namespaced_custom_object(
+            group="machinelearning.seldon.io",
+            version="v1",
+            namespace=namespace,
+            plural="seldondeployments",
+            body=sdep_body
+        )
+        return SimpleNamespace(
+            service_append=service_append,
+            port=port
+        )
+    except client.rest.ApiException as e:
+        logger.exception('Seldon MLflow Deployment creation failed')
         return SimpleNamespace(
             message=json.loads(e.body),
             status_code=500

@@ -62,12 +62,12 @@ class ExperimentView(Resource):
                 else:
                     filter_string = f"tags.app_tag = '{app_alias}'"
 
-            print(filter_string)
+            
 
             experiments = mlflow_client.search_experiments(
                 filter_string=filter_string)
 
-            print(experiments)
+            
 
             if not experiments:
                 return {"status": "success", "message": "No experiments found for the provided criteria"}, 404
@@ -88,7 +88,7 @@ class ExperimentDetailView(Resource):
         try:
             experiment = get_mlflow_client(
                 current_app).get_experiment(experiment_id)
-            print(experiment)
+           
         except Exception as e:
             return {"status": "error", "message": str(e)}, 404
 
