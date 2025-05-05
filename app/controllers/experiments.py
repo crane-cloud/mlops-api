@@ -143,7 +143,7 @@ class ExperimentDetailView(Resource):
 
 class ExperimentTokenGenerator(Resource):
     
-    # @jwt_required
+    @jwt_required
     def get(self):
         user_id = request.args.get("user_id")
         app_alias = request.args.get("app_alias")
