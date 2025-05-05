@@ -144,13 +144,12 @@ class ExperimentDetailView(Resource):
 class ExperimentTokenGenerator(Resource):
     
     @jwt_required
-    def get(self):
+    def get(self, current_user):
         user_id = request.args.get("user_id")
         app_alias = request.args.get("app_alias")
 
         if not user_id or not app_alias:
-            return {"error": "Missing user_id or app_alias"}, 400
-        print('heres-----')
+            return {"error": "Missing user_id or app_alias"}, 40
 
         token = create_access_token(identity={"user_id": user_id, "app_alias": app_alias})
         return {"token": token}, 200
