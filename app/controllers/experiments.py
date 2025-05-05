@@ -5,6 +5,7 @@ from flask import current_app
 from app.schemas.experiments import ExperimentsSchema
 import marshmallow
 from types import SimpleNamespace
+from flask_jwt_extended import create_access_token, get_jwt_identity
 import json
 import uuid
 
@@ -13,9 +14,23 @@ class ExperimentView(Resource):
 
     def post(self):
         try:
+            data = request.get_json(force=True)
+            token = data.get("token")
+            user_id = None
+            app_alias = None
 
-            app_alias = request.args.get("app_alias")
-            user_id = request.args.get("user_id")
+            if token:
+                try:
+                    from flask_jwt_extended import decode_token
+                    identity = decode_token(token)["sub"] 
+                    user_id = identity.get("user_id")
+                    app_alias = identity.get("app_alias")
+                except Exception as e:
+                    return {"error": f"Invalid token: {str(e)}"}, 400
+
+            # Fallback to legacy keys
+            user_id = user_id or data.get("user_id")
+            app_alias = app_alias or data.get("app_alias")
 
             if not app_alias or not user_id:
                 return {"status": "failed", "error": "Both 'app_alias' and 'user_id' are required"}, 400
@@ -124,3 +139,18 @@ class ExperimentDetailView(Resource):
             return {"status": "error", "message": str(e)}, 400
 
         return {"status": "success", "message": "Experiment deleted successfully"}
+
+
+class ExperimentTokenGenerator(Resource):
+    
+    # @jwt_required
+    def get(self):
+        user_id = request.args.get("user_id")
+        app_alias = request.args.get("app_alias")
+
+        if not user_id or not app_alias:
+            return {"error": "Missing user_id or app_alias"}, 400
+        print('heres-----')
+
+        token = create_access_token(identity={"user_id": user_id, "app_alias": app_alias})
+        return {"token": token}, 200
