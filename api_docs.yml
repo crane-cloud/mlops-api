@@ -440,7 +440,7 @@ paths:
           type: string
         - in: query
           name: user_id
-          required: true
+          required: false
           schema:
             type: string
           description: User ID to include in the token

@@ -146,6 +146,10 @@ class ExperimentTokenGenerator(Resource):
     @jwt_required
     def get(self, current_user):
         user_id = request.args.get("user_id")
+
+        if not user_id:
+            user_id = current_user.get("identity")
+
         app_alias = request.args.get("app_alias")
 
         if not user_id or not app_alias:
