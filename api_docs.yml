@@ -86,26 +86,32 @@ paths:
     post:
       tags:
         - experiments
+      summary: Create an MLflow experiment
       consumes:
         - application/json
       produces:
         - application/json
       parameters:
-        - in: query
-          name: user_id
-          type: string
-          description: User id
-        - in: query
-          name: app_alias
-          type: string
-          description: app alias
+        - in: body
+          name: experiment
+          schema:
+            properties:
+              token:
+                type: string
+                description: WT token containing user_id and app_alias
+              user_id:
+                type: string
+                description: User ID (optional fallback if token is not used)
+              app_alias: 
+                  type: string
+                  description: App alias (optional fallback if token is not used)  
       responses:
         200:
-          description: "App created successfully"
+          description: App created successfully
         400:
-          description: "Bad request"
+          description: Bad request
         500:
-          description: "Internal Server Error"
+          description: Internal Server Error
     get:
       tags:
         - experiments
@@ -420,3 +426,42 @@ paths:
           description: "Bad request"
         500:
           description: "Internal Server Error"
+  
+  "/experiment_token":
+    get:
+      tags:
+        - experiments
+      summary: Generate a JWT token using user_id and app_alias
+      parameters:
+        - in: header
+          name: Authorization
+          required: true
+          description: "Bearer [token]"
+          type: string
+        - in: query
+          name: user_id
+          required: false
+          schema:
+            type: string
+          description: User ID to include in the token
+        - in: query
+          name: app_alias
+          required: true
+          schema:
+            type: string
+          description: App alias to include in the token
+      responses:
+        200:
+          description: Token generated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    description: Generated JWT token
+        400:
+          description: Missing user_id or app_alias
+        500:
+          description: Internal Server Error
