@@ -692,6 +692,8 @@ def create_seldon_deployment_mlflow(kube_client, app_alias, namespace, model_uri
     service_append = "default"
     port = 8000
 
+    # 9000 is the default port for MLflow server classifier
+
     sdep_body = {
         "apiVersion": "machinelearning.seldon.io/v1",
         "kind": "SeldonDeployment",
@@ -707,14 +709,14 @@ def create_seldon_deployment_mlflow(kube_client, app_alias, namespace, model_uri
                 "graph": {
                     "name": "classifier",
                     "implementation": "MLFLOW_SERVER",
-                    "modelUri": "file:///mnt/model",  # Matches the initContainer's extraction path
+                    "modelUri": "file:///mnt/models",  # Matches the initContainer's extraction path
                     "children": []
                 },
                 "componentSpecs": [{
                     "spec": {
                         "initContainers": [{
                             "name": "classifier-model-initializer",
-                            "image": "khalifan1126/cc-mlflow-storage-initialiser:amdp",  # Custom storage initializer image
+                            "image": "khalifan1126/cc-mlflow-storage-initialiser:amd1",  # Custom storage initializer image
                             "imagePullPolicy": "IfNotPresent",
                             "env": [
                                 {
@@ -730,7 +732,7 @@ def create_seldon_deployment_mlflow(kube_client, app_alias, namespace, model_uri
                             "terminationMessagePolicy": "File",
                             "volumeMounts": [
                                 {
-                                    "mountPath": "/mnt/model",
+                                    "mountPath": "/mnt/models",
                                     "name": "classifier-provision-location"
                                 }
                             ]
@@ -740,7 +742,7 @@ def create_seldon_deployment_mlflow(kube_client, app_alias, namespace, model_uri
                             "imagePullPolicy": "IfNotPresent",
                             "volumeMounts": [
                                 {
-                                    "mountPath": "/mnt/model",
+                                    "mountPath": "/mnt/models",
                                     "name": "classifier-provision-location"
                                 }
                             ],
@@ -751,7 +753,7 @@ def create_seldon_deployment_mlflow(kube_client, app_alias, namespace, model_uri
                                 "successThreshold": 1,
                                 "httpGet": {
                                     "path": "/health/ping",
-                                    "port": "http",
+                                    "port": 9000, 
                                     "scheme": "HTTP"
                                 }
                             },
@@ -762,7 +764,7 @@ def create_seldon_deployment_mlflow(kube_client, app_alias, namespace, model_uri
                                 "successThreshold": 1,
                                 "httpGet": {
                                     "path": "/health/ping",
-                                    "port": "http",
+                                    "port": 9000,
                                     "scheme": "HTTP"
                                 }
                             }
