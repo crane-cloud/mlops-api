@@ -92,7 +92,6 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
                 'name': app_name
             }
             app_data.update(modal_data)
-        
 
     # check images existence
     app_image = app_data.get('image', None)
@@ -260,21 +259,44 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
 
         # create service in the cluster
         service_name = f'{app_alias}-service'
-        if is_modal and not model_server == 'MLFLOW_SERVER':
-            # Create Seldon Deployment
-            seldon_deployment = create_seldon_deployment(
-                kube_client=kube_client,
-                app_alias=app_alias,
-                namespace=namespace,
-                model_image_uri=app_data['model_image_uri'],
-                replicas=replicas,
-                api_type=app_data['api_type'],
-                model_server=app_data['model_server']
-            )
+        if is_modal:
+            # Create appropriate Seldon Deployment based on model server
+            if model_server == 'MLFLOW_SERVER':
+                seldon_deployment = create_seldon_deployment_mlflow(
+                    kube_client=kube_client,
+                    app_alias=app_alias,
+                    namespace=namespace,
+                    model_uri=app_data['model_image_uri'],
+                    replicas=replicas
+                )
+            elif model_server == 'HUGGINGFACE_SERVER':
+                seldon_deployment = create_seldon_deployment_huggingface(
+                    kube_client=kube_client,
+                    app_alias=app_alias,
+                    namespace=namespace,
+                    model_uri=app_data['model_image_uri'],
+                    task=app_data['task'],
+                    replicas=replicas
+                )
+            else:
+                seldon_deployment = create_seldon_deployment(
+                    kube_client=kube_client,
+                    app_alias=app_alias,
+                    namespace=namespace,
+                    model_image_uri=app_data['model_image_uri'],
+                    replicas=replicas,
+                    api_type=app_data['api_type'],
+                    model_server=app_data['model_server']
+                )
+
+            # Handle common Seldon deployment response and app setup
             if isinstance(seldon_deployment, SimpleNamespace) and hasattr(seldon_deployment, 'status_code'):
                 return seldon_deployment
+
             service_name = f'{app_alias}-{seldon_deployment.service_append}'
             service_port = app_port if app_port else seldon_deployment.port
+
+            # Set common app properties
             new_app.port = service_port
             new_app.is_ai = True
             new_app.is_modal = True
@@ -283,27 +305,6 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
             new_app.api_type = app_data['api_type']
 
             resource_registry['seldon_deployment'] = True
-        elif is_modal and model_server == 'MLFLOW_SERVER':
-            # Create MLflow Seldon Deployment
-            seldon_deployment = create_seldon_deployment_mlflow(
-                kube_client=kube_client,
-                app_alias=app_alias,
-                namespace=namespace,
-                model_uri=app_data['model_image_uri'],
-                replicas=replicas
-            )
-            if isinstance(seldon_deployment, SimpleNamespace) and hasattr(seldon_deployment, 'status_code'):
-                return seldon_deployment
-            service_name = f'{app_alias}-{seldon_deployment.service_append}'
-            service_port = app_port if app_port else seldon_deployment.port
-            new_app.port = service_port
-            new_app.is_ai = True
-            new_app.is_modal = True
-            new_app.model_image_uri = app_data['model_image_uri']
-            new_app.model_server = app_data['model_server']
-            new_app.api_type = app_data['api_type']
-            resource_registry['seldon_deployment'] = True
-
         else:
             # create deployment in  cluster
             kube_client.appsv1_api.create_namespaced_deployment(
@@ -716,16 +717,17 @@ def create_seldon_deployment_mlflow(kube_client, app_alias, namespace, model_uri
                     "spec": {
                         "initContainers": [{
                             "name": "classifier-model-initializer",
-                            "image": "khalifan1126/cc-mlflow-storage-initialiser:amd1",  # Custom storage initializer image
+                            # Custom storage initializer image
+                            "image": "khalifan1126/cc-mlflow-storage-initialiser:amd1",
                             "imagePullPolicy": "IfNotPresent",
                             "env": [
                                 {
                                     "name": "MODEL_URI",
-                                    "value": model_uri  
+                                    "value": model_uri
                                 },
                                 {
                                     "name": "MLFLOW_TRACKING_URI",
-                                    "value": current_app.config['MLFLOW_TRACKING_URI'] 
+                                    "value": current_app.config['MLFLOW_TRACKING_URI']
                                 }
                             ],
                             "terminationMessagePath": "/dev/termination-log",
@@ -753,7 +755,7 @@ def create_seldon_deployment_mlflow(kube_client, app_alias, namespace, model_uri
                                 "successThreshold": 1,
                                 "httpGet": {
                                     "path": "/health/ping",
-                                    "port": 9000, 
+                                    "port": 9000,
                                     "scheme": "HTTP"
                                 }
                             },
@@ -795,6 +797,60 @@ def create_seldon_deployment_mlflow(kube_client, app_alias, namespace, model_uri
         )
     except client.rest.ApiException as e:
         logger.exception('Seldon MLflow Deployment creation failed')
+        return SimpleNamespace(
+            message=json.loads(e.body),
+            status_code=500
+        )
+
+
+def create_seldon_deployment_huggingface(kube_client, app_alias, namespace, model_uri, task, replicas=1):
+    service_append = "default"
+    port = 8000
+    # https://github.com/SeldonIO/seldon-core/blob/master/doc/source/servers/huggingface.md
+
+    sdep_body = {
+        "apiVersion": "machinelearning.seldon.io/v1",
+        "kind": "SeldonDeployment",
+        "metadata": {
+            "name": f"{app_alias}",
+            "namespace": namespace
+        },
+        "spec": {
+            "protocol": "v2",
+            "predictors": [{
+                "name": "default",
+                "replicas": replicas,
+                "graph": {
+                    "name": "transformer",
+                    "implementation": "HUGGINGFACE_SERVER",
+                    "parameters": [{
+                        "name": "task",
+                        "value": task,
+                        "type": "STRING"
+                    }, {
+                        "name": "pretrained_model",
+                        "value": model_uri,
+                        "type": "STRING"
+                    }]
+                }
+            }]
+        }
+    }
+
+    try:
+        kube_client.custom_api.create_namespaced_custom_object(
+            group="machinelearning.seldon.io",
+            version="v1",
+            namespace=namespace,
+            plural="seldondeployments",
+            body=sdep_body
+        )
+        return SimpleNamespace(
+            service_append=service_append,
+            port=port
+        )
+    except client.rest.ApiException as e:
+        logger.exception('Seldon Huggingface Deployment creation failed')
         return SimpleNamespace(
             message=json.loads(e.body),
             status_code=500

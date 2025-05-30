@@ -23,13 +23,16 @@ class AppsView(Resource):
             return dict(status="error", message="Missing data for required field, model_image_uri"), 400
         if validated_data.get('is_modal') and not validated_data.get('model_server'):
             return dict(status="error", message="Missing data for required field, model_server"), 400
-        
+
         if (validated_data.get('is_modal') and validated_data.get('model_server') == "MLFLOW_SERVER"):
-            validation_result = validate_mlflow_artifact(validated_data['model_image_uri'])
+            validation_result = validate_mlflow_artifact(
+                validated_data['model_image_uri'])
             if isinstance(validation_result, tuple):
                 error_body, status_code = validation_result
                 return dict(status="error", message=error_body.get("message", "Validation failed.")), status_code
-
+        if (validated_data.get('is_modal') and validated_data.get('model_server') == "HUGGINGFACE_SERVER"):
+            if not validated_data.get('task'):
+                return dict(status="error", message="Missing data for required field, task for Huggingface model"), 400
         namepaced_data = SimpleNamespace(**validated_data)
         namepaced_data.cluster = SimpleNamespace(**namepaced_data.cluster)
         namepaced_data.project = SimpleNamespace(**namepaced_data.project)
