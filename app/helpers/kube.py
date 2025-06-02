@@ -227,7 +227,18 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
             ports=[client.V1ContainerPort(container_port=app_port)],
             env=env,
             command=command,
-            volume_mounts=[new_volume_mount] if is_ai and is_notebook else None
+            volume_mounts=[
+                new_volume_mount] if is_ai and is_notebook else None,
+            resources={
+                "limits": {
+                    "memory": "2Gi",
+                    "cpu": "1"
+                },
+                "requests": {
+                    "memory": "1Gi",
+                    "cpu": "500m"
+                }
+            }
         )
 
         # spec
@@ -819,7 +830,6 @@ def create_seldon_deployment_huggingface(kube_client, app_alias, namespace, mode
             "protocol": "v2",
             "predictors": [{
                 "name": "default",
-                "replicas": replicas,
                 "graph": {
                     "name": "transformer",
                     "implementation": "HUGGINGFACE_SERVER",
@@ -832,7 +842,49 @@ def create_seldon_deployment_huggingface(kube_client, app_alias, namespace, mode
                         "value": model_uri,
                         "type": "STRING"
                     }]
-                }
+                },
+                "componentSpecs": [{
+                    "spec": {
+                        "containers": [{
+                            "name": "transformer",
+                            "ports": [
+                                {
+                                    "containerPort": port,
+                                    "name": "http",
+                                    "protocol": "TCP"
+                                }
+                            ],
+                            "livenessProbe": {
+                                "httpGet": {
+                                    "path": "/v2/health/live",
+                                    "port": "http"
+                                },
+                                "initialDelaySeconds": 120,
+                                "periodSeconds": 5
+                            },
+                            "readinessProbe": {
+                                "httpGet": {
+                                    "path": "/v2/health/ready",
+                                    "port": "http"
+                                },
+                                "initialDelaySeconds": 120,
+                                "periodSeconds": 5
+                            },
+                            "resources": {
+                                "limits": {
+                                    "memory": "2Gi",
+                                    "cpu": "1"
+                                },
+                                "requests": {
+                                    "memory": "1Gi",
+                                    "cpu": "500m"
+                                }
+                            }
+                        }]
+                    }
+                }],
+                "replicas": replicas,
+
             }]
         }
     }
