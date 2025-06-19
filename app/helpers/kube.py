@@ -84,7 +84,7 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
         if is_modal:
             modal_data = {
                 'model_image_uri': app_data.get('model_image_uri'),
-                'port': 8000,
+                'port': 9000 if app_data.get('model_server', 'MLFLOW_SERVER') == 'HUGGINGFACE_SERVER' else 8000,
                 'is_ai': True,
                 'is_modal': True,
                 'api_type': app_data.get('api_type', 'REST'),
@@ -92,7 +92,6 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
                 'name': app_name
             }
             app_data.update(modal_data)
-        
 
     # check images existence
     app_image = app_data.get('image', None)
@@ -228,7 +227,18 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
             ports=[client.V1ContainerPort(container_port=app_port)],
             env=env,
             command=command,
-            volume_mounts=[new_volume_mount] if is_ai and is_notebook else None
+            volume_mounts=[
+                new_volume_mount] if is_ai and is_notebook else None,
+            resources={
+                "limits": {
+                    "memory": "2Gi",
+                    "cpu": "1"
+                },
+                "requests": {
+                    "memory": "1Gi",
+                    "cpu": "500m"
+                }
+            }
         )
 
         # spec
@@ -260,21 +270,47 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
 
         # create service in the cluster
         service_name = f'{app_alias}-service'
-        if is_modal and not model_server == 'MLFLOW_SERVER':
-            # Create Seldon Deployment
-            seldon_deployment = create_seldon_deployment(
-                kube_client=kube_client,
-                app_alias=app_alias,
-                namespace=namespace,
-                model_image_uri=app_data['model_image_uri'],
-                replicas=replicas,
-                api_type=app_data['api_type'],
-                model_server=app_data['model_server']
-            )
+        if is_modal:
+            # Create appropriate Seldon Deployment based on model server
+            if model_server == 'MLFLOW_SERVER':
+                seldon_deployment = create_seldon_deployment_mlflow(
+                    kube_client=kube_client,
+                    app_alias=app_alias,
+                    namespace=namespace,
+                    model_uri=app_data['model_image_uri'],
+                    replicas=replicas
+                )
+            elif model_server == 'HUGGINGFACE_SERVER':
+                seldon_deployment = create_seldon_deployment_huggingface(
+                    kube_client=kube_client,
+                    app_alias=app_alias,
+                    namespace=namespace,
+                    model_uri=app_data['model_image_uri'],
+                    task=app_data['task'],
+                    replicas=replicas
+                )
+            else:
+                seldon_deployment = create_seldon_deployment(
+                    kube_client=kube_client,
+                    app_alias=app_alias,
+                    namespace=namespace,
+                    model_image_uri=app_data['model_image_uri'],
+                    replicas=replicas,
+                    api_type=app_data['api_type'],
+                    model_server=app_data['model_server']
+                )
+
+            # Handle common Seldon deployment response and app setup
             if isinstance(seldon_deployment, SimpleNamespace) and hasattr(seldon_deployment, 'status_code'):
                 return seldon_deployment
+
             service_name = f'{app_alias}-{seldon_deployment.service_append}'
+            ingress_name = f'{app_alias}-{seldon_deployment.ingress_append}'
+            if not ingress_name:
+                ingress_name = service_name
             service_port = app_port if app_port else seldon_deployment.port
+
+            # Set common app properties
             new_app.port = service_port
             new_app.is_ai = True
             new_app.is_modal = True
@@ -283,27 +319,6 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
             new_app.api_type = app_data['api_type']
 
             resource_registry['seldon_deployment'] = True
-        elif is_modal and model_server == 'MLFLOW_SERVER':
-            # Create MLflow Seldon Deployment
-            seldon_deployment = create_seldon_deployment_mlflow(
-                kube_client=kube_client,
-                app_alias=app_alias,
-                namespace=namespace,
-                model_uri=app_data['model_image_uri'],
-                replicas=replicas
-            )
-            if isinstance(seldon_deployment, SimpleNamespace) and hasattr(seldon_deployment, 'status_code'):
-                return seldon_deployment
-            service_name = f'{app_alias}-{seldon_deployment.service_append}'
-            service_port = app_port if app_port else seldon_deployment.port
-            new_app.port = service_port
-            new_app.is_ai = True
-            new_app.is_modal = True
-            new_app.model_image_uri = app_data['model_image_uri']
-            new_app.model_server = app_data['model_server']
-            new_app.api_type = app_data['api_type']
-            resource_registry['seldon_deployment'] = True
-
         else:
             # create deployment in  cluster
             kube_client.appsv1_api.create_namespaced_deployment(
@@ -361,7 +376,7 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
         # create new ingres rule for the application
         new_ingress_backend = client.V1IngressBackend(
             service=client.V1IngressServiceBackend(
-                name=service_name,
+                name=ingress_name,
                 port=client.V1ServiceBackendPort(
                     number=service_port
                 )
@@ -389,7 +404,7 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
         if not ingress_list:
 
             ingress_meta = client.V1ObjectMeta(
-                name=ingress_name
+                name=ingress_name,
             )
 
             ingress_spec = {
@@ -693,7 +708,6 @@ def create_seldon_deployment_mlflow(kube_client, app_alias, namespace, model_uri
     port = 8000
 
     # 9000 is the default port for MLflow server classifier
-
     sdep_body = {
         "apiVersion": "machinelearning.seldon.io/v1",
         "kind": "SeldonDeployment",
@@ -716,16 +730,17 @@ def create_seldon_deployment_mlflow(kube_client, app_alias, namespace, model_uri
                     "spec": {
                         "initContainers": [{
                             "name": "classifier-model-initializer",
-                            "image": "khalifan1126/cc-mlflow-storage-initialiser:amd1",  # Custom storage initializer image
+                            # Custom storage initializer image
+                            "image": "khalifan1126/cc-mlflow-storage-initialiser:amd1",
                             "imagePullPolicy": "IfNotPresent",
                             "env": [
                                 {
                                     "name": "MODEL_URI",
-                                    "value": model_uri  
+                                    "value": model_uri
                                 },
                                 {
                                     "name": "MLFLOW_TRACKING_URI",
-                                    "value": current_app.config['MLFLOW_TRACKING_URI'] 
+                                    "value": current_app.config['MLFLOW_TRACKING_URI']
                                 }
                             ],
                             "terminationMessagePath": "/dev/termination-log",
@@ -753,7 +768,7 @@ def create_seldon_deployment_mlflow(kube_client, app_alias, namespace, model_uri
                                 "successThreshold": 1,
                                 "httpGet": {
                                     "path": "/health/ping",
-                                    "port": 9000, 
+                                    "port": 9000,
                                     "scheme": "HTTP"
                                 }
                             },
@@ -795,6 +810,192 @@ def create_seldon_deployment_mlflow(kube_client, app_alias, namespace, model_uri
         )
     except client.rest.ApiException as e:
         logger.exception('Seldon MLflow Deployment creation failed')
+        return SimpleNamespace(
+            message=json.loads(e.body),
+            status_code=500
+        )
+
+
+def create_seldon_deployment_huggingface(kube_client, app_alias, namespace, model_uri, task, replicas=1):
+    # port shouldn't be 8000 to prevent port conflicts
+    port = 9000
+    service_append = "default"
+    ingress_append = "default-transformer"
+    # https://github.com/SeldonIO/seldon-core/blob/master/doc/source/servers/huggingface.md
+    # the implementation string can change depending on the version of seldon containers being used
+    
+    # needed for hugging face model deployments
+    model_settings_json = json.dumps({
+        "name": f"{app_alias}",
+        "implementation": "mlserver_huggingface.runtime.HuggingFaceRuntime",
+        "parameters": {
+            "extra": {
+                "task": task,
+                "pretrained_model": model_uri,
+            }
+        }
+    }).replace('"', '\\"')
+
+    sdep_body = {
+        "apiVersion": "machinelearning.seldon.io/v1",
+        "kind": "SeldonDeployment",
+        "metadata": {
+            "name": f"{app_alias}",
+            "namespace": namespace,
+        },
+        "spec": {
+            "protocol": "v2",
+            "predictors": [{
+                "name": "default",
+                "graph": {
+                    "name": "transformer",
+                    "implementation": "HUGGINGFACE_SERVER",
+                    "children": [],
+                    "parameters": [
+                        {
+                            "name": "task",
+                            "value": task,
+                            "type": "STRING"
+                        },
+                        {
+                            "name": "pretrained_model",
+                            "value": model_uri,
+                            "type": "STRING"
+                        },
+                        # {
+                        #     "name": "runtime",
+                        #     "value": "mlserver_huggingface.huggingface",
+                        #     "type": "STRING"
+                        # },
+                    ]
+                },
+                "componentSpecs": [{
+                    "spec": {
+                        # prevent deployment on non gpu node
+                        "nodeSelector": {
+                            "nvidia.com/gpu.present": "true"
+                        },
+                        "tolerations": [
+                            {
+                                "key": "nvidia.com/gpu",
+                                "operator": "Exists",
+                                "effect": "NoSchedule"
+                            }
+                        ],
+                        # unloads the model-settings.json file
+                        "initContainers": [
+                            {
+                                "name": "write-model-settings",
+                                "image": "python:3.9-slim",
+                                "command": ["sh", "-c"],
+                                "args": [
+                                    f"""
+                                    echo 'Writing model-settings.json...'; \
+                                    echo \"{model_settings_json}\" > /mnt/models/model-settings.json; \
+                                    echo 'Contents of model-settings.json:'; \
+                                    cat /mnt/models/model-settings.json; \
+                                    echo 'Done writing model-settings.json.'
+                                    """
+                                ],
+                                "volumeMounts": [
+                                    {
+                                        "name": "transformer-provision-location",
+                                        "mountPath": "/mnt/models"
+                                    }
+                                ]
+                            }
+                        ],
+                        "containers": [
+                            {
+                                "name": "transformer", 
+                                "imagePullPolicy": "IfNotPresent",
+                                "env": [
+                                    {"name": "MLSERVER_DEBUG", "value": "true"},
+                                    {"name": "PYTHONUNBUFFERED", "value": "1"},
+                                    # {"name": "MLSERVER_MODEL_IMPLEMENTATION", "value": "mlserver_huggingface.huggingface"},
+                                    {"name": "MLSERVER_MODEL_NAME", "value": "models"},
+                                    {"name": "GOMAXPROCS", "value": "2"},
+                                    {"name": "OMP_NUM_THREADS", "value": "1"},
+                                    {"name": "MKL_NUM_THREADS", "value": "1"},
+                                    {"name": "OPENBLAS_NUM_THREADS", "value": "1"},
+                                    {"name": "MLSERVER_MODEL_PARAMETERS", "value": json.dumps({
+                                        "uri": model_uri,
+                                        "extra": {
+                                            "task": task
+                                        }
+                                    })}
+                                ],
+                                "ports": [{
+                                    "containerPort": port,
+                                    "name": "http",
+                                    "protocol": "TCP"
+                                }],
+                                "volumeMounts": [
+                                    {
+                                        "name": "transformer-provision-location",
+                                        "mountPath": "/mnt/models"
+                                    }
+                                ],
+                                "livenessProbe": {
+                                    "httpGet": {
+                                        "path": "/v2/health/live",
+                                        "port": "http"
+                                    },
+                                    "initialDelaySeconds": 60,
+                                    "periodSeconds": 10,
+                                    "timeoutSeconds": 5,
+                                    "failureThreshold": 3
+                                },
+                                "readinessProbe": {
+                                    "httpGet": {
+                                        "path": "/v2/health/ready",
+                                        "port": "http"
+                                    },
+                                    "initialDelaySeconds": 60,
+                                    "periodSeconds": 5,
+                                    "timeoutSeconds": 5,
+                                    "failureThreshold": 3
+                                },
+                                "resources": {
+                                    "limits": {
+                                        "memory": "8Gi",
+                                        "cpu": "4"
+                                    },
+                                    "requests": {
+                                        "memory": "2Gi",
+                                        "cpu": "2"
+                                    }
+                                }
+                            }
+                        ],
+                        "volumes": [
+                            {
+                                "name": "transformer-provision-location",
+                                "emptyDir": {}
+                            }
+                        ]
+                    }
+                }],
+                "replicas": replicas
+            }]
+        }
+    }
+
+    try:
+        kube_client.custom_api.create_namespaced_custom_object(
+            group="machinelearning.seldon.io",
+            version="v1",
+            namespace=namespace,
+            plural="seldondeployments",
+            body=sdep_body
+        )
+        return SimpleNamespace(
+            service_append=service_append,
+            ingress_append=ingress_append,
+            port=port
+        )
+    except client.rest.ApiException as e:
+        logger.exception('Seldon Huggingface Deployment creation failed')
         return SimpleNamespace(
             message=json.loads(e.body),
             status_code=500
