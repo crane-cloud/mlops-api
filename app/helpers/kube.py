@@ -374,6 +374,10 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
                 app_alias, cluster.sub_domain)
 
         # create new ingres rule for the application
+        # to fix notebook creation ingress name
+        if 'ingress_name' not in locals():
+            ingress_name = f'{project.alias}-ingress'
+
         new_ingress_backend = client.V1IngressBackend(
             service=client.V1IngressServiceBackend(
                 name=ingress_name,
