@@ -304,10 +304,12 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
             if isinstance(seldon_deployment, SimpleNamespace) and hasattr(seldon_deployment, 'status_code'):
                 return seldon_deployment
 
-            service_name = f'{app_alias}-{seldon_deployment.service_append}'
-            ingress_name = f'{app_alias}-{seldon_deployment.ingress_append}'
-            if not ingress_name:
-                ingress_name = service_name
+            ingress_name = service_name
+            if not is_notebook:
+                service_name = f'{app_alias}-{seldon_deployment.service_append}'
+                if seldon_deployment.ingress_append:
+                    ingress_name = f'{app_alias}-{seldon_deployment.ingress_append}'
+
             service_port = app_port if app_port else seldon_deployment.port
 
             # Set common app properties
@@ -380,7 +382,7 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
 
         new_ingress_backend = client.V1IngressBackend(
             service=client.V1IngressServiceBackend(
-                name=ingress_name,
+                name=service_name,
                 port=client.V1ServiceBackendPort(
                     number=service_port
                 )
@@ -827,7 +829,7 @@ def create_seldon_deployment_huggingface(kube_client, app_alias, namespace, mode
     ingress_append = "default-transformer"
     # https://github.com/SeldonIO/seldon-core/blob/master/doc/source/servers/huggingface.md
     # the implementation string can change depending on the version of seldon containers being used
-    
+
     # needed for hugging face model deployments
     model_settings_json = json.dumps({
         "name": f"{app_alias}",
@@ -911,13 +913,14 @@ def create_seldon_deployment_huggingface(kube_client, app_alias, namespace, mode
                         ],
                         "containers": [
                             {
-                                "name": "transformer", 
+                                "name": "transformer",
                                 "imagePullPolicy": "IfNotPresent",
                                 "env": [
                                     {"name": "MLSERVER_DEBUG", "value": "true"},
                                     {"name": "PYTHONUNBUFFERED", "value": "1"},
                                     # {"name": "MLSERVER_MODEL_IMPLEMENTATION", "value": "mlserver_huggingface.huggingface"},
-                                    {"name": "MLSERVER_MODEL_NAME", "value": "models"},
+                                    {"name": "MLSERVER_MODEL_NAME",
+                                        "value": "models"},
                                     {"name": "GOMAXPROCS", "value": "2"},
                                     {"name": "OMP_NUM_THREADS", "value": "1"},
                                     {"name": "MKL_NUM_THREADS", "value": "1"},
