@@ -270,6 +270,7 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
 
         # create service in the cluster
         service_name = f'{app_alias}-service'
+        seldon_deployment = None
         if is_modal:
             # Create appropriate Seldon Deployment based on model server
             if model_server == 'MLFLOW_SERVER':
@@ -304,11 +305,10 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
             if isinstance(seldon_deployment, SimpleNamespace) and hasattr(seldon_deployment, 'status_code'):
                 return seldon_deployment
 
-            ingress_name = service_name
-            if not is_notebook:
+            if seldon_deployment and seldon_deployment.service_append:
                 service_name = f'{app_alias}-{seldon_deployment.service_append}'
-                if seldon_deployment.ingress_append:
-                    ingress_name = f'{app_alias}-{seldon_deployment.ingress_append}'
+            if seldon_deployment and seldon_deployment.ingress_append:
+                ingress_service_name = f'{app_alias}-{seldon_deployment.ingress_append}'
 
             service_port = app_port if app_port else seldon_deployment.port
 
@@ -379,10 +379,12 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
         # to fix notebook creation ingress name
         if 'ingress_name' not in locals():
             ingress_name = f'{project.alias}-ingress'
+        if 'ingress_service_name' not in locals():
+            ingress_service_name = service_name
 
         new_ingress_backend = client.V1IngressBackend(
             service=client.V1IngressServiceBackend(
-                name=service_name,
+                name=ingress_service_name,
                 port=client.V1ServiceBackendPort(
                     number=service_port
                 )
