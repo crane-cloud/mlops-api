@@ -8,35 +8,73 @@ from app.helpers.clean_up import resource_clean_up
 from app.helpers.crane_app_logger import logger
 from flask import current_app
 
+# Constants for better maintainability
+DEFAULT_DOCKER_SERVER = 'docker.io'
+DEFAULT_REPLICAS = 1
+DEFAULT_APP_PORT = 80
+DEFAULT_STORAGE = '1Gi'
+DEFAULT_MOUNT_PATH = '/data'
+DEFAULT_SERVICE_APPEND = "default"
+DEFAULT_PORT = 8000
+HUGGINGFACE_PORT = 9000
+JUPYTER_MOUNT_PATH = '/home/jovyan/work'
+DEFAULT_NAMESPACE_APP_NAME = 'cranecloud-app'
+
+# Resource limits and requests
+DEFAULT_RESOURCE_LIMITS = {
+    "memory": "2Gi",
+    "cpu": "1"
+}
+DEFAULT_RESOURCE_REQUESTS = {
+    "memory": "1Gi",
+    "cpu": "500m"
+}
+
+# GPU resource limits for AI models
+GPU_RESOURCE_LIMITS = {
+    "memory": "8Gi",
+    "cpu": "4"
+}
+GPU_RESOURCE_REQUESTS = {
+    "memory": "2Gi",
+    "cpu": "2"
+}
+
 
 def get_app_subdomain(alias, domain):
-
+    """Generate application subdomain from alias and domain."""
     return f'{alias}.{domain}'
 
 
 def create_kube_clients(kube_host, kube_token):
-    # configure client
+    """
+    Create and configure Kubernetes API clients.
+
+    Args:
+        kube_host (str): Kubernetes API server host
+        kube_token (str): Kubernetes authentication token
+
+    Returns:
+        SimpleNamespace: Object containing configured Kubernetes API clients
+    """
+    # Configure client
     config = client.Configuration()
     config.host = kube_host
     config.api_key['authorization'] = kube_token
     config.api_key_prefix['authorization'] = 'Bearer'
     config.verify_ssl = False
-    # config.assert_hostname = False
 
-    # create API instance
+    # Create API instances
     api_client = client.ApiClient()
     kube = client.CoreV1Api(client.ApiClient(config))
-    # extension_api = client.ExtensionsV1beta1Api(client.ApiClient(config))
     appsv1_api = client.AppsV1Api(client.ApiClient(config))
     batchv1_api = client.BatchV1Api(client.ApiClient(config))
     storageV1Api = client.StorageV1Api(client.ApiClient(config))
     networking_api = client.NetworkingV1Api(client.ApiClient(config))
     custom_api = client.CustomObjectsApi(client.ApiClient(config))
 
-    # return kube, extension_api, appsv1_api, api_client, batchv1_api, storageV1Api
     return SimpleNamespace(
         kube=kube,
-        # extension_api=extension_api,
         networking_api=networking_api,
         appsv1_api=appsv1_api,
         api_client=api_client,
@@ -46,82 +84,83 @@ def create_kube_clients(kube_host, kube_token):
     )
 
 
-def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app_data={}):
-    """
-    deploy an application
-    """
-
-    resource_registry = {
+def _initialize_resource_registry():
+    """Initialize resource registry for tracking created Kubernetes resources."""
+    return {
         'db_deployment': False,
         'db_service': False,
         'image_pull_secret': False,
         'app_deployment': False,
         'app_service': False,
         'ingress_entry': False,
-        'seldon_deployment': False
+        'seldon_deployment': False,
+        'pvc': False
     }
 
+
+def _setup_notebook_data(app_data, app_name):
+    """Setup notebook-specific configuration data."""
+    return {
+        'image': 'cranecloud/jupyter-notebook:latest',
+        'port': 8888,
+        'is_ai': True,
+        'is_notebook': True,
+        'name': app_name
+    }
+
+
+def _setup_modal_data(app_data, app_name):
+    """Setup modal-specific configuration data."""
+    model_server = app_data.get('model_server', 'MLFLOW_SERVER')
+    port = HUGGINGFACE_PORT if model_server == 'HUGGINGFACE_SERVER' else DEFAULT_PORT
+
+    return {
+        'model_image_uri': app_data.get('model_image_uri'),
+        'port': port,
+        'is_ai': True,
+        'is_modal': True,
+        'api_type': app_data.get('api_type', 'REST'),
+        'model_server': model_server,
+        'name': app_name
+    }
+
+
+def _extract_app_data(app_data, app=None):
+    """Extract and validate application data from input parameters."""
     is_notebook = app_data.get('is_notebook', False)
     is_modal = app_data.get('is_modal', False)
     app_name = app_data.get('name', None)
     model_server = app_data.get('model_server', 'MLFLOW_SERVER')
 
-    if is_notebook or is_modal:
-        if not app_name:
-            return SimpleNamespace(
-                message='Missing data for required field, name',
-                status_code=400
-            )
-        if is_notebook:
-            notebook_data = {
-                'image': 'cranecloud/jupyter-notebook:latest',
-                'port': 8888,
-                'is_ai': True,
-                'is_notebook': True,
-                'name': app_name
-            }
-            app_data.update(notebook_data)
-        if is_modal:
-            modal_data = {
-                'model_image_uri': app_data.get('model_image_uri'),
-                'port': 9000 if app_data.get('model_server', 'MLFLOW_SERVER') == 'HUGGINGFACE_SERVER' else 8000,
-                'is_ai': True,
-                'is_modal': True,
-                'api_type': app_data.get('api_type', 'REST'),
-                'model_server': app_data.get('model_server', 'MLFLOW_SERVER'),
-                'name': app_name
-            }
-            app_data.update(modal_data)
+    # Validate required fields for notebook/modal apps
+    if (is_notebook or is_modal) and not app_name:
+        return SimpleNamespace(
+            message='Missing data for required field, name',
+            status_code=400
+        )
 
-    # check images existence
+    # Setup notebook or modal specific data
+    if is_notebook:
+        app_data.update(_setup_notebook_data(app_data, app_name))
+    if is_modal:
+        app_data.update(_setup_modal_data(app_data, app_name))
+
+    # Extract common app parameters
     app_image = app_data.get('image', None)
-    docker_server = app_data.get(
-        'docker_server', 'docker.io')
+    docker_server = app_data.get('docker_server', DEFAULT_DOCKER_SERVER)
     docker_password = app_data.get('docker_password', None)
-    # should be a docker hub image
-    # if 'gcr' not in docker_server:
-    #     validate_docker_image = docker_image_checker(
-    #         app_image, docker_password, project)
-    #     if validate_docker_image != True:
-    #         return SimpleNamespace(
-    #             message=validate_docker_image,
-    #             status_code=404
-    #         )
-
     app_alias = create_alias(app_name)
     command_string = app_data.get('command', None)
-    # env_vars = app_data['env_vars']
     env_vars = app_data.get('env_vars', None)
     private_repo = app_data.get('private_image', False)
-    docker_server = app_data.get('docker_server', 'docker.io')
     docker_username = app_data.get('docker_username', None)
-    docker_password = app_data.get('docker_password', None)
     docker_email = app_data.get('docker_email', None)
-    replicas = app_data.get('replicas', 1)
-    app_port = app_data.get('port', 80)
+    replicas = app_data.get('replicas', DEFAULT_REPLICAS)
+    app_port = app_data.get('port', DEFAULT_APP_PORT)
     custom_domain = app_data.get('custom_domain', None)
-    image_pull_secret = None
+    project = app_data.get('project', {})
 
+    # Override with existing app data if provided
     if app:
         app_name = app.name
         app_alias = app.alias
@@ -131,294 +170,196 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
         replicas = app.replicas
         app_port = app.port
         custom_domain = app.has_custom_domain
-        image_pull_secret = None
 
     command = command_string.split() if command_string else None
 
-    namespace = project.alias
+    return SimpleNamespace(
+        app_name=app_name,
+        app_alias=app_alias,
+        app_image=app_image,
+        command=command,
+        command_string=command_string,
+        env_vars=env_vars,
+        private_repo=private_repo,
+        docker_server=docker_server,
+        docker_username=docker_username,
+        docker_password=docker_password,
+        docker_email=docker_email,
+        replicas=replicas,
+        app_port=app_port,
+        custom_domain=custom_domain,
+        is_notebook=is_notebook,
+        is_modal=is_modal,
+        is_ai=is_modal or is_notebook,
+        model_server=model_server,
+        project_id=project['id']
+    )
 
-    try:
 
-        if app:
-            new_app = app
-        else:
-            new_app = SimpleNamespace(
-                name=app_name,
-                image=app_image,
-                project_id=project.id,
-                alias=app_alias,
-                port=app_port,
-                command=command_string,
-                replicas=replicas,
-                private_image=private_repo,
-            )
-
-        if private_repo:
-            image_pull_secret = create_docker_pull_secret(
-                kube_client=kube_client,
-                app_alias=app_alias,
-                namespace=namespace,
-                docker_username=docker_username,
-                docker_password=docker_password,
-                docker_email=docker_email,
-                docker_server=docker_server
-            )
-            # update registry
-            resource_registry['image_pull_secret'] = True
-
-        elif current_app.config['SYSTEM_DOCKER_EMAIL'] and current_app.config['SYSTEM_DOCKER_PASSWORD']:
-            DEFAULT_NAMESPACE = namespace
-            DEFAULT_APP_NAME = 'cranecloud-app'
-            try:
-                kube_client.kube.read_namespaced_secret(
-                    DEFAULT_APP_NAME, DEFAULT_NAMESPACE)
-            except client.rest.ApiException as e:
-                if e.status == 404:
-                    image_pull_secret = create_docker_pull_secret(
-                        kube_client=kube_client,
-                        app_alias=DEFAULT_APP_NAME,
-                        namespace=DEFAULT_NAMESPACE,
-                        docker_username=current_app.config['SYSTEM_DOCKER_EMAIL'],
-                        docker_password=current_app.config['SYSTEM_DOCKER_PASSWORD'],
-                        docker_email=current_app.config['SYSTEM_DOCKER_EMAIL'],
-                        docker_server=current_app.config['SYSTEM_DOCKER_SERVER']
-                    )
-                else:
-                    raise
-
-            # update registry
-            resource_registry['image_pull_secret'] = True
-
-        # create deployment
-        dep_name = f'{app_alias}-deployment'
-
-        mount_path = '/data'
-
-        # create app deployment's pvc meta and spec
-        is_ai = app_data.get('is_ai', False)
-        new_volume_mount = None
-        new_volumes = None
-        service_port = current_app.config['KUBE_SERVICE_PORT']
-
-        if is_ai and is_notebook:
-            pvc_name = f'{app_alias}-pvc'
-            new_app.is_ai = True
-            if is_notebook:
-                mount_path = '/home/jovyan/work'
-                new_app.is_notebook = True
-            volumes, volume_mount = create_pvc(
-                kube_client, pvc_name, namespace, mount_path=mount_path)
-            new_volume_mount = volume_mount
-            new_volumes = volumes
-            resource_registry['pvc'] = True
-
-        # EnvVar
-        env = []
-        if env_vars:
-            for key, value in env_vars.items():
-                env.append(client.V1EnvVar(
-                    name=str(key), value=str(value)
-                ))
-
-        # pod template
-        container = client.V1Container(
-            name=app_alias,
-            image=app_image,
-            ports=[client.V1ContainerPort(container_port=app_port)],
-            env=env,
-            command=command,
-            volume_mounts=[
-                new_volume_mount] if is_ai and is_notebook else None,
-            resources={
-                "limits": {
-                    "memory": "2Gi",
-                    "cpu": "1"
-                },
-                "requests": {
-                    "memory": "1Gi",
-                    "cpu": "500m"
-                }
-            }
+def _create_app_object(app, extracted_data):
+    """Create or update application object."""
+    if app:
+        return app
+    else:
+        return SimpleNamespace(
+            name=extracted_data.app_name,
+            image=extracted_data.app_image,
+            project_id=extracted_data.project_id,
+            alias=extracted_data.app_alias,
+            port=extracted_data.app_port,
+            command=extracted_data.command_string,
+            replicas=extracted_data.replicas,
+            private_image=extracted_data.private_repo,
         )
 
-        # spec
-        template = client.V1PodTemplateSpec(
-            metadata=client.V1ObjectMeta(labels={
-                'app': app_alias
-            }),
-            spec=client.V1PodSpec(
-                containers=[container],
-                image_pull_secrets=[image_pull_secret],
-                volumes=new_volumes if is_ai and is_notebook else None
-            )
-        )
 
-        # spec of deployment
-        spec = client.V1DeploymentSpec(
-            replicas=replicas,
-            template=template,
-            selector={'matchLabels': {'app': app_alias}}
-        )
+def _handle_image_pull_secret(kube_client, extracted_data, namespace, resource_registry):
+    """Handle creation of image pull secrets for private repositories."""
+    image_pull_secret = None
 
-        # Instantiate the deployment
-        deployment = client.V1Deployment(
-            api_version="apps/v1",
-            kind="Deployment",
-            metadata=client.V1ObjectMeta(name=dep_name),
-            spec=spec
+    if extracted_data.private_repo:
+        image_pull_secret = create_docker_pull_secret(
+            kube_client=kube_client,
+            app_alias=extracted_data.app_alias,
+            namespace=namespace,
+            docker_username=extracted_data.docker_username,
+            docker_password=extracted_data.docker_password,
+            docker_email=extracted_data.docker_email,
+            docker_server=extracted_data.docker_server
         )
+        resource_registry['image_pull_secret'] = True
 
-        # create service in the cluster
-        service_name = f'{app_alias}-service'
-        seldon_deployment = None
-        if is_modal:
-            # Create appropriate Seldon Deployment based on model server
-            if model_server == 'MLFLOW_SERVER':
-                seldon_deployment = create_seldon_deployment_mlflow(
+    elif (current_app.config.get('SYSTEM_DOCKER_EMAIL') and
+          current_app.config.get('SYSTEM_DOCKER_PASSWORD')):
+        try:
+            kube_client.kube.read_namespaced_secret(
+                DEFAULT_NAMESPACE_APP_NAME, namespace)
+        except client.rest.ApiException as e:
+            if e.status == 404:
+                image_pull_secret = create_docker_pull_secret(
                     kube_client=kube_client,
-                    app_alias=app_alias,
+                    app_alias=DEFAULT_NAMESPACE_APP_NAME,
                     namespace=namespace,
-                    model_uri=app_data['model_image_uri'],
-                    replicas=replicas
-                )
-            elif model_server == 'HUGGINGFACE_SERVER':
-                seldon_deployment = create_seldon_deployment_huggingface(
-                    kube_client=kube_client,
-                    app_alias=app_alias,
-                    namespace=namespace,
-                    model_uri=app_data['model_image_uri'],
-                    task=app_data['task'],
-                    replicas=replicas
+                    docker_username=current_app.config['SYSTEM_DOCKER_EMAIL'],
+                    docker_password=current_app.config['SYSTEM_DOCKER_PASSWORD'],
+                    docker_email=current_app.config['SYSTEM_DOCKER_EMAIL'],
+                    docker_server=current_app.config['SYSTEM_DOCKER_SERVER']
                 )
             else:
-                seldon_deployment = create_seldon_deployment(
-                    kube_client=kube_client,
-                    app_alias=app_alias,
-                    namespace=namespace,
-                    model_image_uri=app_data['model_image_uri'],
-                    replicas=replicas,
-                    api_type=app_data['api_type'],
-                    model_server=app_data['model_server']
-                )
+                raise
+        resource_registry['image_pull_secret'] = True
 
-            # Handle common Seldon deployment response and app setup
-            if isinstance(seldon_deployment, SimpleNamespace) and hasattr(seldon_deployment, 'status_code'):
-                return seldon_deployment
+    return image_pull_secret
 
-            if seldon_deployment and seldon_deployment.service_append:
-                service_name = f'{app_alias}-{seldon_deployment.service_append}'
-            if seldon_deployment and seldon_deployment.ingress_append:
-                ingress_service_name = f'{app_alias}-{seldon_deployment.ingress_append}'
 
-            service_port = app_port if app_port else seldon_deployment.port
+def _create_deployment_spec(extracted_data, app_port, env_vars, image_pull_secret, volume_mount=None, volumes=None):
+    """Create deployment specification with integrated container creation."""
+    # Create environment variables
+    env = []
+    if env_vars:
+        for key, value in env_vars.items():
+            env.append(client.V1EnvVar(
+                name=str(key), value=str(value)
+            ))
 
-            # Set common app properties
-            new_app.port = service_port
-            new_app.is_ai = True
-            new_app.is_modal = True
-            new_app.model_image_uri = app_data['model_image_uri']
-            new_app.model_server = app_data['model_server']
-            new_app.api_type = app_data['api_type']
+    # Create container specification
+    container = client.V1Container(
+        name=extracted_data.app_alias,
+        image=extracted_data.app_image,
+        ports=[client.V1ContainerPort(container_port=app_port)],
+        env=env,
+        command=extracted_data.command,
+        volume_mounts=[volume_mount] if volume_mount else None,
+        resources={
+            "limits": DEFAULT_RESOURCE_LIMITS,
+            "requests": DEFAULT_RESOURCE_REQUESTS
+        }
+    )
 
-            resource_registry['seldon_deployment'] = True
-        else:
-            # create deployment in  cluster
-            kube_client.appsv1_api.create_namespaced_deployment(
-                body=deployment,
-                namespace=namespace,
-                _preload_content=False
-            )
+    # Create pod template
+    template = client.V1PodTemplateSpec(
+        metadata=client.V1ObjectMeta(labels={
+            'app': extracted_data.app_alias
+        }),
+        spec=client.V1PodSpec(
+            containers=[container],
+            image_pull_secrets=[
+                image_pull_secret] if image_pull_secret else None,
+            volumes=volumes
+        )
+    )
 
-            # update registry
-            resource_registry['app_deployment'] = True
+    # Create deployment
+    return client.V1Deployment(
+        api_version="apps/v1",
+        kind="Deployment",
+        metadata=client.V1ObjectMeta(
+            name=f'{extracted_data.app_alias}-deployment'),
+        spec=client.V1DeploymentSpec(
+            replicas=extracted_data.replicas,
+            template=template,
+            selector={'matchLabels': {'app': extracted_data.app_alias}}
+        )
+    )
 
-            service_meta = client.V1ObjectMeta(
-                name=service_name,
-                labels={'app': app_alias}
-            )
 
-            service_spec = client.V1ServiceSpec(
-                type='ClusterIP',
-                ports=[client.V1ServicePort(
-                    port=int(service_port), target_port=app_port)],
-                selector={'app': app_alias}
-            )
+def _create_service_spec(extracted_data, service_port, app_port):
+    """Create service specification."""
+    service_name = f'{extracted_data.app_alias}-service'
 
-            service = client.V1Service(
-                metadata=service_meta,
-                spec=service_spec)
+    service_meta = client.V1ObjectMeta(
+        name=service_name,
+        labels={'app': extracted_data.app_alias}
+    )
 
-            try:
-                # Check if service exists in the cluster
-                kube_client.kube.read_namespaced_service(
-                    service_name, project.alias)
-                # Delete service
-                kube_client.kube.delete_namespaced_service(
-                    service_name, project.alias)
-            except:
-                pass
+    service_spec = client.V1ServiceSpec(
+        type='ClusterIP',
+        ports=[client.V1ServicePort(
+            port=int(service_port), target_port=app_port)],
+        selector={'app': extracted_data.app_alias}
+    )
 
-            kube_client.kube.create_namespaced_service(
-                namespace=namespace,
-                body=service,
-                _preload_content=False
-            )
+    return client.V1Service(
+        metadata=service_meta,
+        spec=service_spec
+    ), service_name
 
-        # update resource registry
-        resource_registry['app_service'] = True
 
-        if custom_domain and user.is_beta_user:
-            sub_domain = custom_domain
-            app_data['has_custom_domain'] = True
-
-        else:
-            sub_domain = get_app_subdomain(
-                app_alias, cluster.sub_domain)
-
-        # create new ingres rule for the application
-        # to fix notebook creation ingress name
-        if 'ingress_name' not in locals():
-            ingress_name = f'{project.alias}-ingress'
-        if 'ingress_service_name' not in locals():
-            ingress_service_name = service_name
-
-        new_ingress_backend = client.V1IngressBackend(
-            service=client.V1IngressServiceBackend(
-                name=ingress_service_name,
-                port=client.V1ServiceBackendPort(
-                    number=service_port
-                )
+def _create_ingress_rule(service_name, service_port, sub_domain):
+    """Create ingress rule for the application."""
+    new_ingress_backend = client.V1IngressBackend(
+        service=client.V1IngressServiceBackend(
+            name=service_name,
+            port=client.V1ServiceBackendPort(
+                number=service_port
             )
         )
+    )
 
-        new_ingress_rule = client.V1IngressRule(
-            host=sub_domain,
-            http=client.V1HTTPIngressRuleValue(
-                paths=[client.V1HTTPIngressPath(
-                    path="",
-                    path_type="ImplementationSpecific",
-                    backend=new_ingress_backend
-                )]
-            )
+    return client.V1IngressRule(
+        host=sub_domain,
+        http=client.V1HTTPIngressRuleValue(
+            paths=[client.V1HTTPIngressPath(
+                path="",
+                path_type="ImplementationSpecific",
+                backend=new_ingress_backend
+            )]
         )
+    )
 
-        ingress_name = f'{project.alias}-ingress'
 
-        # Check if there is an ingress resource in the namespace, create if not
+def _handle_ingress_creation(kube_client, namespace, ingress_rule, project_alias):
+    """Handle ingress creation or update."""
+    ingress_name = f'{project_alias}-ingress'
 
+    try:
         ingress_list = kube_client.networking_api.list_namespaced_ingress(
             namespace=namespace).items
 
         if not ingress_list:
-
-            ingress_meta = client.V1ObjectMeta(
-                name=ingress_name,
-            )
-
-            ingress_spec = {
-                'rules': [new_ingress_rule]
-            }
-
+            # Create new ingress
+            ingress_meta = client.V1ObjectMeta(name=ingress_name)
+            ingress_spec = {'rules': [ingress_rule]}
             ingress_body = {
                 "apiVersion": "networking.k8s.io/v1",
                 "kind": "Ingress",
@@ -430,70 +371,222 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
                 namespace=namespace,
                 body=ingress_body
             )
-
-            # update registry
-            resource_registry['ingress_entry'] = True
+            return True
         else:
-            # Update ingress with new entry
+            # Update existing ingress
             ingress = ingress_list[0]
-
-            ingress.spec.rules.append(new_ingress_rule)
-
+            ingress.spec.rules.append(ingress_rule)
             kube_client.networking_api.patch_namespaced_ingress(
                 name=ingress_name,
                 namespace=namespace,
                 body=ingress
             )
+            return True
+    except Exception as e:
+        logger.error(f"Failed to create/update ingress: {str(e)}")
+        return False
 
-        service_url = f'https://{sub_domain}'
 
-        new_app.url = service_url
+def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app_data={}):
+    """
+    Deploy an application to Kubernetes cluster.
 
+    Args:
+        kube_client: Kubernetes API client
+        project: Project object
+        user: User object (optional)
+        app: Existing app object (optional)
+        cluster: Cluster object (optional)
+        app_data: Application configuration data
+
+    Returns:
+        SimpleNamespace: Application object or error response
+    """
+    resource_registry = _initialize_resource_registry()
+
+    # Extract and validate app data
+    extracted_data = _extract_app_data(app_data, app)
+    if hasattr(extracted_data, 'status_code'):
+        return extracted_data
+
+    namespace = project.alias
+    new_app = _create_app_object(app, extracted_data)
+    app_alias = extracted_data.app_alias
+
+    try:
+        # Handle image pull secrets
+        image_pull_secret = _handle_image_pull_secret(
+            kube_client, extracted_data, namespace, resource_registry
+        )
+
+        # Handle PVC creation for AI notebooks
+        new_volume_mount = None
+        new_volumes = None
+        service_port = current_app.config['KUBE_SERVICE_PORT']
+
+        if extracted_data.is_ai and extracted_data.is_notebook:
+            pvc_name = f'{app_alias}-pvc'
+            new_app.is_ai = True
+            mount_path = JUPYTER_MOUNT_PATH if extracted_data.is_notebook else DEFAULT_MOUNT_PATH
+            new_app.is_notebook = True
+
+            volumes, volume_mount = create_pvc(
+                kube_client, pvc_name, namespace, mount_path=mount_path
+            )
+            new_volume_mount = volume_mount
+            new_volumes = volumes
+            resource_registry['pvc'] = True
+
+        # Handle Seldon deployment for modal apps
+        service_name = f'{app_alias}-service'
+        seldon_deployment = None
+
+        if extracted_data.is_modal:
+            seldon_deployment = _create_seldon_deployment_by_type(
+                kube_client, extracted_data, namespace, app_data
+            )
+
+            if isinstance(seldon_deployment, SimpleNamespace) and hasattr(seldon_deployment, 'status_code'):
+                return seldon_deployment
+
+            if seldon_deployment and seldon_deployment.service_append:
+                service_name = f'{app_alias}-{seldon_deployment.service_append}'
+            if seldon_deployment and seldon_deployment.ingress_append:
+                custom_ingress_service_name = f'{app_alias}-{seldon_deployment.ingress_append}'
+
+            service_port = extracted_data.app_port if extracted_data.app_port else seldon_deployment.port
+
+            # Set common app properties
+            new_app.port = service_port
+            new_app.is_ai = True
+            new_app.is_modal = True
+            new_app.model_image_uri = app_data['model_image_uri']
+            new_app.model_server = app_data['model_server']
+            new_app.api_type = app_data['api_type']
+
+            resource_registry['seldon_deployment'] = True
+        else:
+
+            # Create deployment specification
+            deployment = _create_deployment_spec(
+                extracted_data, extracted_data.app_port, extracted_data.env_vars,
+                image_pull_secret, new_volume_mount, new_volumes
+            )
+            # Create standard deployment
+            kube_client.appsv1_api.create_namespaced_deployment(
+                body=deployment,
+                namespace=namespace,
+                _preload_content=False
+            )
+            resource_registry['app_deployment'] = True
+
+            # Create service
+            service, service_name = _create_service_spec(
+                extracted_data, service_port, extracted_data.app_port
+            )
+
+            try:
+                # Check if service exists and delete if necessary
+                kube_client.kube.read_namespaced_service(
+                    service_name, project.alias)
+                kube_client.kube.delete_namespaced_service(
+                    service_name, project.alias)
+            except:
+                pass
+
+            kube_client.kube.create_namespaced_service(
+                namespace=namespace,
+                body=service,
+                _preload_content=False
+            )
+
+        resource_registry['app_service'] = True
+
+        # Handle custom domain or generate subdomain
+        if extracted_data.custom_domain and user and user.is_beta_user:
+            sub_domain = extracted_data.custom_domain
+            app_data['has_custom_domain'] = True
+        else:
+            sub_domain = get_app_subdomain(
+                extracted_data.app_alias, cluster.sub_domain)
+
+        if 'custom_ingress_service_name' in locals():
+            service_name = custom_ingress_service_name
+
+        # Create ingress rule
+        ingress_rule = _create_ingress_rule(
+            service_name, service_port, sub_domain)
+
+        if _handle_ingress_creation(kube_client, namespace, ingress_rule, project.alias):
+            resource_registry['ingress_entry'] = True
+
+        new_app.url = f'https://{sub_domain}'
         return new_app
 
     except client.rest.ApiException as e:
-        logger.exception('Exception occurred')
-        resource_clean_up(
-            resource_registry,
-            app_alias,
-            namespace,
-            kube_client
-        )
-
-        # log_activity('App', status='Failed',
-        #              operation='Create',
-        #              description=json.loads(e.body),
-        #              a_project=project,
-        #              a_cluster_id=project.cluster_id,
-        #              )
-
+        logger.exception('Kubernetes API exception occurred')
+        resource_clean_up(resource_registry,
+                          extracted_data.app_alias, namespace, kube_client)
         return SimpleNamespace(
             message=json.loads(e.body),
             status_code=500
         )
 
     except Exception as e:
-        logger.exception('Exception occurred')
-        resource_clean_up(
-            resource_registry,
-            app_alias,
-            namespace,
-            kube_client
-        )
-        # log_activity('App', status='Failed',
-        #              operation='Create',
-        #              description=str(e),
-        #              a_project=project,
-        #              a_cluster_id=project.cluster_id,
-        #              )
-
+        logger.exception('Unexpected exception occurred')
+        resource_clean_up(resource_registry,
+                          extracted_data.app_alias, namespace, kube_client)
         return SimpleNamespace(
             message=str(e),
             status_code=500
         )
 
 
-def create_pvc(kube_client, dep_name, namespace, mount_path='/data', storage='1Gi'):
+def _create_seldon_deployment_by_type(kube_client, extracted_data, namespace, app_data):
+    """Create Seldon deployment based on model server type."""
+    if extracted_data.model_server == 'MLFLOW_SERVER':
+        return create_seldon_deployment_mlflow(
+            kube_client=kube_client,
+            app_alias=extracted_data.app_alias,
+            namespace=namespace,
+            model_uri=app_data['model_image_uri'],
+            replicas=extracted_data.replicas
+        )
+    elif extracted_data.model_server == 'HUGGINGFACE_SERVER':
+        return create_seldon_deployment_huggingface(
+            kube_client=kube_client,
+            app_alias=extracted_data.app_alias,
+            namespace=namespace,
+            model_uri=app_data['model_image_uri'],
+            task=app_data['task'],
+            replicas=extracted_data.replicas
+        )
+    else:
+        return create_seldon_deployment(
+            kube_client=kube_client,
+            app_alias=extracted_data.app_alias,
+            namespace=namespace,
+            model_image_uri=app_data['model_image_uri'],
+            replicas=extracted_data.replicas,
+            api_type=app_data['api_type'],
+            model_server=app_data['model_server']
+        )
+
+
+def create_pvc(kube_client, dep_name, namespace, mount_path=DEFAULT_MOUNT_PATH, storage=DEFAULT_STORAGE):
+    """
+    Create a Persistent Volume Claim (PVC) for the application.
+
+    Args:
+        kube_client: Kubernetes API client
+        dep_name: Deployment name
+        namespace: Kubernetes namespace
+        mount_path: Volume mount path
+        storage: Storage size
+
+    Returns:
+        tuple: (volumes, volume_mount) for pod specification
+    """
     pvc_name = f'{dep_name}-pvc'
     pvc_meta = client.V1ObjectMeta(name=pvc_name)
 
@@ -517,30 +610,46 @@ def create_pvc(kube_client, dep_name, namespace, mount_path='/data', storage='1G
         body=pvc,
         _preload_content=False
     )
+
     # Pod volumes
     volumes = [client.V1Volume(
         name=dep_name,
         persistent_volume_claim=client.V1PersistentVolumeClaimVolumeSource(
             claim_name=pvc_name)
     )]
+
     # Define volume mount
     volume_mount = client.V1VolumeMount(
         mount_path=mount_path,
         name=dep_name
     )
+
     return volumes, volume_mount
 
 
 def create_docker_pull_secret(kube_client, app_alias, namespace, docker_username, docker_password, docker_email, docker_server):
-    """Create a docker pull secret for repositories"""
+    """
+    Create a docker pull secret for private repositories.
 
-    # handle gcr credentials
+    Args:
+        kube_client: Kubernetes API client
+        app_alias: Application alias
+        namespace: Kubernetes namespace
+        docker_username: Docker registry username
+        docker_password: Docker registry password
+        docker_email: Docker registry email
+        docker_server: Docker registry server
+
+    Returns:
+        V1LocalObjectReference: Image pull secret reference
+    """
+    # Handle GCR credentials
     if 'gcr' in docker_server and docker_username == '_json_key':
         docker_password = json.dumps(
             json.loads(base64.b64decode(docker_password))
         )
 
-    # create image pull secrets
+    # Create image pull secrets
     authstring = base64.b64encode(
         f'{docker_username}:{docker_password}'.encode("utf-8"))
 
@@ -567,12 +676,19 @@ def create_docker_pull_secret(kube_client, app_alias, namespace, docker_username
         body=secret_body,
         _preload_content=False)
 
-    image_pull_secret = client.V1LocalObjectReference(
-        name=app_alias)
-    return image_pull_secret
+    return client.V1LocalObjectReference(name=app_alias)
 
 
 def update_app_env_vars(client, cluster_deployment, env_vars, delete_env_vars=[]):
+    """
+    Update environment variables for a Kubernetes deployment.
+
+    Args:
+        client: Kubernetes client
+        cluster_deployment: Deployment object
+        env_vars: New environment variables to add
+        delete_env_vars: Environment variables to delete
+    """
     container = cluster_deployment.spec.template.spec.containers[0]
 
     if env_vars:
@@ -591,7 +707,6 @@ def update_app_env_vars(client, cluster_deployment, env_vars, delete_env_vars=[]
 
         # Add existing app variables
         env.extend(env_list)
-
         container.env = env
     else:
         # Handle case where no new environment variables are provided
@@ -600,12 +715,22 @@ def update_app_env_vars(client, cluster_deployment, env_vars, delete_env_vars=[]
 
 
 def delete_cluster_app(kube_client, namespace, app):
-    # delete deployment and service for the app
+    """
+    Delete application resources from Kubernetes cluster.
 
+    Args:
+        kube_client: Kubernetes API client
+        namespace: Kubernetes namespace
+        app: Application object
+
+    Returns:
+        tuple: (response_dict, status_code) or None
+    """
     deployment_name = f'{app.alias}-deployment'
     service_name = f'{app.alias}-service'
-    try:
 
+    try:
+        # Delete deployment
         deployment = kube_client.appsv1_api.read_namespaced_deployment(
             name=deployment_name,
             namespace=namespace
@@ -617,6 +742,7 @@ def delete_cluster_app(kube_client, namespace, app):
                 namespace=namespace
             )
 
+        # Delete service
         service = kube_client.kube.read_namespaced_service(
             name=service_name,
             namespace=namespace
@@ -628,6 +754,7 @@ def delete_cluster_app(kube_client, namespace, app):
                 namespace=namespace
             )
 
+        # Delete secret
         secret = kube_client.kube.read_namespaced_secret(
             name=app.alias,
             namespace=namespace
@@ -637,11 +764,11 @@ def delete_cluster_app(kube_client, namespace, app):
             namespace=namespace
         )
     except Exception as e:
-        logger.exception('Exception occurred')
-        if e.status != 404:
+        logger.exception('Exception occurred during app deletion')
+        if hasattr(e, 'status') and e.status != 404:
             return dict(status='fail', message=str(e)), 500
 
-    # delete pvc
+    # Delete PVC
     pvc_name = f'{app.alias}-pvc'
     try:
         pvc = kube_client.kube.read_namespaced_persistent_volume_claim(
@@ -659,13 +786,35 @@ def delete_cluster_app(kube_client, namespace, app):
 
 
 def check_kube_error_code(error):
-    # prevent a 401 from being sent to the frontend
+    """
+    Check and return appropriate error code for Kubernetes errors.
+
+    Args:
+        error: Error code
+
+    Returns:
+        int: Appropriate HTTP status code
+    """
+    # Prevent a 401 from being sent to the frontend
     return 511 if error == 401 else error
 
 
 def create_seldon_deployment(kube_client, app_alias, namespace, model_image_uri, replicas, api_type, model_server):
-    service_append = "default"
-    port = 8000
+    """
+    Create a generic Seldon deployment.
+
+    Args:
+        kube_client: Kubernetes API client
+        app_alias: Application alias
+        namespace: Kubernetes namespace
+        model_image_uri: Model image URI
+        replicas: Number of replicas
+        api_type: API type
+        model_server: Model server type
+
+    Returns:
+        SimpleNamespace: Deployment result or error response
+    """
     sdep_body = {
         "apiVersion": "machinelearning.seldon.io/v1",
         "kind": "SeldonDeployment",
@@ -676,7 +825,7 @@ def create_seldon_deployment(kube_client, app_alias, namespace, model_image_uri,
         "spec": {
             "name": app_alias,
             "predictors": [{
-                "name": service_append,
+                "name": DEFAULT_SERVICE_APPEND,
                 "replicas": replicas,
                 "graph": {
                     "name": "classifier",
@@ -700,8 +849,8 @@ def create_seldon_deployment(kube_client, app_alias, namespace, model_image_uri,
             body=sdep_body
         )
         return SimpleNamespace(
-            service_append=service_append,
-            port=port
+            service_append=DEFAULT_SERVICE_APPEND,
+            port=DEFAULT_PORT
         )
     except client.rest.ApiException as e:
         logger.exception('Seldon Deployment creation failed')
@@ -712,10 +861,19 @@ def create_seldon_deployment(kube_client, app_alias, namespace, model_image_uri,
 
 
 def create_seldon_deployment_mlflow(kube_client, app_alias, namespace, model_uri, replicas=1):
-    service_append = "default"
-    port = 8000
+    """
+    Create a MLflow-specific Seldon deployment.
 
-    # 9000 is the default port for MLflow server classifier
+    Args:
+        kube_client: Kubernetes API client
+        app_alias: Application alias
+        namespace: Kubernetes namespace
+        model_uri: Model URI
+        replicas: Number of replicas
+
+    Returns:
+        SimpleNamespace: Deployment result or error response
+    """
     sdep_body = {
         "apiVersion": "machinelearning.seldon.io/v1",
         "kind": "SeldonDeployment",
@@ -726,7 +884,7 @@ def create_seldon_deployment_mlflow(kube_client, app_alias, namespace, model_uri
         "spec": {
             "name": app_alias,
             "predictors": [{
-                "name": service_append,
+                "name": DEFAULT_SERVICE_APPEND,
                 "replicas": replicas,
                 "graph": {
                     "name": "classifier",
@@ -738,7 +896,6 @@ def create_seldon_deployment_mlflow(kube_client, app_alias, namespace, model_uri
                     "spec": {
                         "initContainers": [{
                             "name": "classifier-model-initializer",
-                            # Custom storage initializer image
                             "image": "khalifan1126/cc-mlflow-storage-initialiser:amd1",
                             "imagePullPolicy": "IfNotPresent",
                             "env": [
@@ -813,8 +970,8 @@ def create_seldon_deployment_mlflow(kube_client, app_alias, namespace, model_uri
             body=sdep_body
         )
         return SimpleNamespace(
-            service_append=service_append,
-            port=port
+            service_append=DEFAULT_SERVICE_APPEND,
+            port=DEFAULT_PORT
         )
     except client.rest.ApiException as e:
         logger.exception('Seldon MLflow Deployment creation failed')
@@ -825,14 +982,23 @@ def create_seldon_deployment_mlflow(kube_client, app_alias, namespace, model_uri
 
 
 def create_seldon_deployment_huggingface(kube_client, app_alias, namespace, model_uri, task, replicas=1):
-    # port shouldn't be 8000 to prevent port conflicts
-    port = 9000
-    service_append = "default"
-    ingress_append = "default-transformer"
-    # https://github.com/SeldonIO/seldon-core/blob/master/doc/source/servers/huggingface.md
-    # the implementation string can change depending on the version of seldon containers being used
+    """
+    Create a Hugging Face-specific Seldon deployment.
 
-    # needed for hugging face model deployments
+    Args:
+        kube_client: Kubernetes API client
+        app_alias: Application alias
+        namespace: Kubernetes namespace
+        model_uri: Model URI
+        task: Model task type
+        replicas: Number of replicas
+
+    Returns:
+        SimpleNamespace: Deployment result or error response
+    """
+    ingress_append = "default-transformer"
+
+    # Model settings for Hugging Face deployments
     model_settings_json = json.dumps({
         "name": f"{app_alias}",
         "implementation": "mlserver_huggingface.runtime.HuggingFaceRuntime",
@@ -870,16 +1036,11 @@ def create_seldon_deployment_huggingface(kube_client, app_alias, namespace, mode
                             "value": model_uri,
                             "type": "STRING"
                         },
-                        # {
-                        #     "name": "runtime",
-                        #     "value": "mlserver_huggingface.huggingface",
-                        #     "type": "STRING"
-                        # },
                     ]
                 },
                 "componentSpecs": [{
                     "spec": {
-                        # prevent deployment on non gpu node
+                        # Prevent deployment on non GPU node
                         "nodeSelector": {
                             "nvidia.com/gpu.present": "true"
                         },
@@ -890,7 +1051,7 @@ def create_seldon_deployment_huggingface(kube_client, app_alias, namespace, mode
                                 "effect": "NoSchedule"
                             }
                         ],
-                        # unloads the model-settings.json file
+                        # Unloads the model-settings.json file
                         "initContainers": [
                             {
                                 "name": "write-model-settings",
@@ -920,7 +1081,6 @@ def create_seldon_deployment_huggingface(kube_client, app_alias, namespace, mode
                                 "env": [
                                     {"name": "MLSERVER_DEBUG", "value": "true"},
                                     {"name": "PYTHONUNBUFFERED", "value": "1"},
-                                    # {"name": "MLSERVER_MODEL_IMPLEMENTATION", "value": "mlserver_huggingface.huggingface"},
                                     {"name": "MLSERVER_MODEL_NAME",
                                         "value": "models"},
                                     {"name": "GOMAXPROCS", "value": "2"},
@@ -935,7 +1095,7 @@ def create_seldon_deployment_huggingface(kube_client, app_alias, namespace, mode
                                     })}
                                 ],
                                 "ports": [{
-                                    "containerPort": port,
+                                    "containerPort": HUGGINGFACE_PORT,
                                     "name": "http",
                                     "protocol": "TCP"
                                 }],
@@ -966,14 +1126,8 @@ def create_seldon_deployment_huggingface(kube_client, app_alias, namespace, mode
                                     "failureThreshold": 3
                                 },
                                 "resources": {
-                                    "limits": {
-                                        "memory": "8Gi",
-                                        "cpu": "4"
-                                    },
-                                    "requests": {
-                                        "memory": "2Gi",
-                                        "cpu": "2"
-                                    }
+                                    "limits": GPU_RESOURCE_LIMITS,
+                                    "requests": GPU_RESOURCE_REQUESTS
                                 }
                             }
                         ],
@@ -999,9 +1153,9 @@ def create_seldon_deployment_huggingface(kube_client, app_alias, namespace, mode
             body=sdep_body
         )
         return SimpleNamespace(
-            service_append=service_append,
+            service_append=DEFAULT_SERVICE_APPEND,
             ingress_append=ingress_append,
-            port=port
+            port=HUGGINGFACE_PORT
         )
     except client.rest.ApiException as e:
         logger.exception('Seldon Huggingface Deployment creation failed')
