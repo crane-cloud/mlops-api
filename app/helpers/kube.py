@@ -1,4 +1,4 @@
-from app.helpers.alias import create_alias
+from app.helpers.alias import create_alias, shorten_alias
 from flask import current_app
 from types import SimpleNamespace
 from kubernetes import client
@@ -43,7 +43,7 @@ GPU_RESOURCE_REQUESTS = {
 
 def get_app_subdomain(alias, domain):
     """Generate application subdomain from alias and domain."""
-    return f'{alias}.{domain}'
+    return f'{shorten_alias(alias)}.{domain}'
 
 
 def create_kube_clients(kube_host, kube_token):
