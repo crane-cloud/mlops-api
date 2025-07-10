@@ -121,7 +121,7 @@ def _setup_modal_data(app_data, app_name):
         'is_modal': True,
         'api_type': app_data.get('api_type', 'REST'),
         'model_server': model_server,
-        'name': app_name
+        'name': app_name,
     }
 
 
@@ -160,16 +160,16 @@ def _extract_app_data(app_data, app=None):
     custom_domain = app_data.get('custom_domain', None)
     project = app_data.get('project', {})
 
-    # Override with existing app data if provided
+    # Override with existing app data if not provided
     if app:
-        app_name = app.name
-        app_alias = app.alias
-        app_image = app.image
-        command_string = app.command
-        private_repo = app.private_image
-        replicas = app.replicas
-        app_port = app.port
-        custom_domain = app.has_custom_domain
+        app_name = app_name if app_name else app.name
+        app_alias = app_alias if app_alias else app.alias
+        app_image = app_image if app_image else app.image
+        command_string = command_string if command_string else app.command
+        private_repo = private_repo if private_repo else app.private_image
+        replicas = replicas if replicas else app.replicas
+        app_port = app_port if app_port else app.port
+        custom_domain = custom_domain if custom_domain else app.custom_domain
 
     command = command_string.split() if command_string else None
 
@@ -192,7 +192,7 @@ def _extract_app_data(app_data, app=None):
         is_modal=is_modal,
         is_ai=is_modal or is_notebook,
         model_server=model_server,
-        project_id=project['id']
+        project_id=project['id'],
     )
 
 
@@ -463,6 +463,7 @@ def deploy_user_app(kube_client, project, user=None, app=None, cluster=None, app
             new_app.model_image_uri = app_data['model_image_uri']
             new_app.model_server = app_data['model_server']
             new_app.api_type = app_data['api_type']
+            new_app.task = app_data.get('task', None)
 
             resource_registry['seldon_deployment'] = True
         else:
