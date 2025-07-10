@@ -6,7 +6,6 @@ from app.helpers.mlflow_service import validate_mlflow_artifact
 from app.helpers.authenticate import (
     jwt_required
 )
-from mlflow.exceptions import MlflowException
 import marshmallow
 
 
@@ -52,5 +51,4 @@ class AppsView(Resource):
 
     @jwt_required
     def get(self, current_user):
-        # print(current_user)
         return dict(status="success", message="Welcome to Crane Cloud MLOps API")
