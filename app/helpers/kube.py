@@ -972,7 +972,6 @@ def create_seldon_deployment_mlflow(kube_client, app_alias, namespace, model_uri
         )
         return SimpleNamespace(
             service_append=DEFAULT_SERVICE_APPEND,
-            ingress_append=DEFAULT_SERVICE_APPEND,
             port=DEFAULT_PORT
         )
     except client.rest.ApiException as e:
